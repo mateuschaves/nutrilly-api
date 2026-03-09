@@ -70,6 +70,9 @@ export class OpenAIService {
     });
 
     const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response content from OpenAI');
+    }
     return JSON.parse(content) as InferredMeal;
   }
 
@@ -89,6 +92,9 @@ export class OpenAIService {
     });
 
     const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response content from OpenAI');
+    }
     return JSON.parse(content) as InferredMeal;
   }
 }

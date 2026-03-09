@@ -70,7 +70,9 @@ export class MealsController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) {
-      throw new BadRequestException('Photo file is required');
+      throw new BadRequestException(
+        'Photo file is required. Please upload an image file (e.g., JPEG, PNG)',
+      );
     }
 
     const inferredMeal = await this.openAIService.inferMacrosFromPhoto(
