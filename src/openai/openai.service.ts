@@ -16,6 +16,7 @@ export interface InferredMeal {
 }
 
 const SYSTEM_PROMPT = `You are a nutrition expert. You must analyze meals and estimate their nutritional content.
+Identify EVERY distinct food item present in the meal. If there are multiple foods (e.g. rice, beans, meat, salad, sauce), list EACH one as a separate item in the array with its own estimated weight and macros.
 Return ONLY a valid JSON response with the following structure (no extra text):
 {
   "items": [
@@ -29,7 +30,7 @@ Return ONLY a valid JSON response with the following structure (no extra text):
     }
   ]
 }
-Be as accurate as possible with your estimates. Always return at least one item.`;
+Be as accurate as possible with your estimates. Always return at least one item. Never group different foods into a single item — each food must be its own entry.`;
 
 @Injectable()
 export class OpenAIService {
@@ -57,7 +58,7 @@ export class OpenAIService {
           content: [
             {
               type: 'text',
-              text: 'Analyze this meal photo and estimate the nutritional content of each food item visible.',
+              text: 'Analyze this meal photo carefully. Identify every distinct food item visible on the plate or in the image. Return each food as a separate item in the array with its estimated weight in grams and nutritional macros per 100g.',
             },
             {
               type: 'image_url',
@@ -85,7 +86,7 @@ export class OpenAIService {
         { role: 'system', content: SYSTEM_PROMPT },
         {
           role: 'user',
-          content: `Analyze the following meal description and estimate the nutritional content of each food item:\n\n"${description}"`,
+          content: `Analyze the following meal description carefully. Identify every distinct food item mentioned. Return each food as a separate item in the array with its estimated weight in grams and nutritional macros per 100g.\n\n"${description}"`,
         },
       ],
       response_format: { type: 'json_object' },
