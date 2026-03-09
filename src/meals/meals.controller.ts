@@ -1,20 +1,133 @@
-import { Controller, Get, Post, Body, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  UseGuards,
+  Request,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MealsService } from './meals.service';
+import { OpenAIService } from '../openai/openai.service';
+import { S3Service } from '../s3/s3.service';
 import { CreateMealDto } from './dto/create-meal.dto';
+import { CreateMealFromPhotoDto } from './dto/create-meal-from-photo.dto';
+import { CreateMealFromDescriptionDto } from './dto/create-meal-from-description.dto';
 
 @ApiTags('meals')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('meals')
 export class MealsController {
-  constructor(private mealsService: MealsService) {}
+  constructor(
+    private mealsService: MealsService,
+    private openAIService: OpenAIService,
+    private s3Service: S3Service,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a meal with items' })
   async create(@Request() req, @Body() dto: CreateMealDto) {
     return this.mealsService.create(req.user.id, dto);
+  }
+
+  @Post('from-photo')
+  @ApiOperation({
+    summary: 'Create a meal by uploading a photo (AI infers macros)',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['name', 'photo'],
+      properties: {
+        name: {
+          type: 'string',
+          enum: ['breakfast', 'lunch', 'dinner', 'snack'],
+          example: 'lunch',
+        },
+        eaten_at: {
+          type: 'string',
+          description: 'ISO date string for when the meal was eaten',
+        },
+        photo: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('photo'))
+  async createFromPhoto(
+    @Request() req,
+    @Body() dto: CreateMealFromPhotoDto,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException(
+        'Photo file is required. Please upload an image file (e.g., JPEG, PNG)',
+      );
+    }
+
+    const moderation = await this.openAIService.moderatePhoto(
+      file.buffer,
+      file.mimetype,
+    );
+
+    if (moderation.flagged) {
+      await this.mealsService.flagSuspiciousPhoto(req.user.id, moderation);
+      throw new ForbiddenException(
+        'The uploaded photo was flagged as inappropriate and has been logged for review.',
+      );
+    }
+
+    const inferredMeal = await this.openAIService.inferMacrosFromPhoto(
+      file.buffer,
+      file.mimetype,
+    );
+
+    const photoUrl = await this.s3Service.uploadMealPhoto(
+      req.user.id,
+      file.buffer,
+      file.mimetype,
+    );
+
+    return this.mealsService.createFromAI(
+      req.user.id,
+      dto.name,
+      dto.eaten_at,
+      inferredMeal,
+      photoUrl,
+    );
+  }
+
+  @Post('from-description')
+  @ApiOperation({
+    summary: 'Create a meal from a text description (AI infers macros)',
+  })
+  async createFromDescription(
+    @Request() req,
+    @Body() dto: CreateMealFromDescriptionDto,
+  ) {
+    const inferredMeal = await this.openAIService.inferMacrosFromDescription(
+      dto.description,
+    );
+
+    return this.mealsService.createFromAI(
+      req.user.id,
+      dto.name,
+      dto.eaten_at,
+      inferredMeal,
+    );
   }
 
   @Get()

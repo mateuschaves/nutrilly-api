@@ -19,6 +19,7 @@ model User {
   waterLogs      WaterLog[]
   dailySummaries DailySummary[]
   streak         Streak?
+  suspiciousPhotos SuspiciousPhoto[]
 
   @@map("users")
 }
@@ -54,6 +55,7 @@ model Meal {
   id         String   @id @default(uuid())
   user_id    String
   name       String
+  photo_url  String?
   eaten_at   DateTime @default(now())
   created_at DateTime @default(now())
 
@@ -116,4 +118,16 @@ model Streak {
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("streaks")
+}
+
+model SuspiciousPhoto {
+  id          String   @id @default(uuid())
+  user_id     String
+  reason      String
+  categories  String
+  flagged_at  DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("suspicious_photos")
 }
