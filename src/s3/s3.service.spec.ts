@@ -16,23 +16,24 @@ jest.mock('@aws-sdk/client-s3', () => {
 describe('S3Service', () => {
   let service: S3Service;
 
-  const mockConfigService = {
+  const createConfigService = (overrides: Record<string, string | undefined> = {}) => ({
     get: jest.fn((key: string, defaultValue?: string) => {
-      const config: Record<string, string> = {
+      const config: Record<string, string | undefined> = {
         AWS_S3_REGION: 'us-east-1',
         AWS_S3_BUCKET: 'test-bucket',
         AWS_ACCESS_KEY_ID: 'test-key',
         AWS_SECRET_ACCESS_KEY: 'test-secret',
+        ...overrides,
       };
-      return config[key] || defaultValue || '';
+      return config[key] !== undefined ? config[key] : defaultValue;
     }),
-  };
+  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         S3Service,
-        { provide: ConfigService, useValue: mockConfigService },
+        { provide: ConfigService, useValue: createConfigService() },
       ],
     }).compile();
 
@@ -42,6 +43,25 @@ describe('S3Service', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('constructor', () => {
+    it('should throw if AWS credentials are missing', async () => {
+      await expect(
+        Test.createTestingModule({
+          providers: [
+            S3Service,
+            {
+              provide: ConfigService,
+              useValue: createConfigService({
+                AWS_ACCESS_KEY_ID: undefined,
+                AWS_SECRET_ACCESS_KEY: undefined,
+              }),
+            },
+          ],
+        }).compile(),
+      ).rejects.toThrow('AWS credentials are required');
+    });
   });
 
   describe('uploadMealPhoto', () => {

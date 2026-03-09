@@ -16,14 +16,22 @@ export class S3Service {
       'nutrilly-photos',
     );
 
+    const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
+    const secretAccessKey = this.configService.get<string>(
+      'AWS_SECRET_ACCESS_KEY',
+    );
+
+    if (!accessKeyId || !secretAccessKey) {
+      throw new Error(
+        'AWS credentials are required. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables.',
+      );
+    }
+
     this.client = new S3Client({
       region: this.region,
       credentials: {
-        accessKeyId: this.configService.get<string>('AWS_ACCESS_KEY_ID', ''),
-        secretAccessKey: this.configService.get<string>(
-          'AWS_SECRET_ACCESS_KEY',
-          '',
-        ),
+        accessKeyId,
+        secretAccessKey,
       },
     });
   }
