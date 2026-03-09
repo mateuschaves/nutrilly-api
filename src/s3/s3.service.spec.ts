@@ -10,8 +10,13 @@ jest.mock('@aws-sdk/client-s3', () => {
       send: mockSend,
     })),
     PutObjectCommand: jest.fn().mockImplementation((params) => params),
+    GetObjectCommand: jest.fn().mockImplementation((params) => params),
   };
 });
+
+jest.mock('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: jest.fn().mockResolvedValue('https://signed-url.example.com/photo.jpeg'),
+}));
 
 describe('S3Service', () => {
   let service: S3Service;
@@ -65,18 +70,16 @@ describe('S3Service', () => {
   });
 
   describe('uploadMealPhoto', () => {
-    it('should upload a photo and return the S3 URL', async () => {
+    it('should upload a photo and return the S3 key', async () => {
       mockSend.mockResolvedValue({});
 
-      const url = await service.uploadMealPhoto(
+      const key = await service.uploadMealPhoto(
         'user-123',
         Buffer.from('fake-image'),
         'image/jpeg',
       );
 
-      expect(url).toMatch(
-        /^https:\/\/test-bucket\.s3\.us-east-1\.amazonaws\.com\/meals\/user-123\/.+\.jpeg$/,
-      );
+      expect(key).toMatch(/^meals\/user-123\/.+\.jpeg$/);
       expect(mockSend).toHaveBeenCalledWith(
         expect.objectContaining({
           Bucket: 'test-bucket',
@@ -90,13 +93,13 @@ describe('S3Service', () => {
     it('should handle PNG files correctly', async () => {
       mockSend.mockResolvedValue({});
 
-      const url = await service.uploadMealPhoto(
+      const key = await service.uploadMealPhoto(
         'user-456',
         Buffer.from('fake-png'),
         'image/png',
       );
 
-      expect(url).toMatch(/\.png$/);
+      expect(key).toMatch(/\.png$/);
       expect(mockSend).toHaveBeenCalledWith(
         expect.objectContaining({
           ContentType: 'image/png',
@@ -107,18 +110,38 @@ describe('S3Service', () => {
     it('should generate unique keys for each upload', async () => {
       mockSend.mockResolvedValue({});
 
-      const url1 = await service.uploadMealPhoto(
+      const key1 = await service.uploadMealPhoto(
         'user-123',
         Buffer.from('image-1'),
         'image/jpeg',
       );
-      const url2 = await service.uploadMealPhoto(
+      const key2 = await service.uploadMealPhoto(
         'user-123',
         Buffer.from('image-2'),
         'image/jpeg',
       );
 
-      expect(url1).not.toBe(url2);
+      expect(key1).not.toBe(key2);
+    });
+  });
+
+  describe('getSignedPhotoUrl', () => {
+    it('should return a presigned URL for a given key', async () => {
+      const url = await service.getSignedPhotoUrl('meals/user-123/photo.jpeg');
+
+      expect(url).toBe('https://signed-url.example.com/photo.jpeg');
+    });
+
+    it('should pass custom expiration to getSignedUrl', async () => {
+      const { getSignedUrl: mockGetSignedUrl } = require('@aws-sdk/s3-request-presigner');
+
+      await service.getSignedPhotoUrl('meals/user-123/photo.jpeg', 7200);
+
+      expect(mockGetSignedUrl).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ Key: 'meals/user-123/photo.jpeg' }),
+        { expiresIn: 7200 },
+      );
     });
   });
 });
