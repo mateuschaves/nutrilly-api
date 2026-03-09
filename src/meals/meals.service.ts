@@ -44,6 +44,7 @@ export class MealsService {
     mealName: string,
     eatenAt: string | undefined,
     inferredMeal: InferredMeal,
+    photoUrl?: string,
   ) {
     const eatenDate = eatenAt ? new Date(eatenAt) : new Date();
 
@@ -78,6 +79,7 @@ export class MealsService {
         user_id: userId,
         name: mealName,
         eaten_at: eatenDate,
+        photo_url: photoUrl,
         items: { create: mealItems },
       },
       include: { items: { include: { food: true } } },

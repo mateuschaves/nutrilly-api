@@ -55,6 +55,7 @@ model Meal {
   id         String   @id @default(uuid())
   user_id    String
   name       String
+  photo_url  String?
   eaten_at   DateTime @default(now())
   created_at DateTime @default(now())
 

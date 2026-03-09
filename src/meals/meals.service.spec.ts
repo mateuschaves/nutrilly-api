@@ -169,6 +169,7 @@ describe('MealsService', () => {
           data: expect.objectContaining({
             user_id: 'user-123',
             name: 'lunch',
+            photo_url: undefined,
             items: {
               create: [
                 expect.objectContaining({
@@ -232,6 +233,45 @@ describe('MealsService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             eaten_at: new Date('2024-03-01T12:00:00Z'),
+          }),
+        }),
+      );
+    });
+
+    it('should store photo_url when provided', async () => {
+      const inferredMeal = {
+        items: [
+          {
+            name: 'Pasta',
+            grams: 200,
+            calories_per_100g: 131,
+            protein_per_100g: 5,
+            carbs_per_100g: 25,
+            fat_per_100g: 1.1,
+          },
+        ],
+      };
+
+      mockPrisma.food.create.mockResolvedValue({ id: 'food-ai-4' });
+      mockPrisma.meal.create.mockResolvedValue({
+        id: 'meal-photo-1',
+        eaten_at: new Date(),
+        photo_url: 'https://bucket.s3.us-east-1.amazonaws.com/meals/user-123/photo.jpeg',
+        items: [],
+      });
+      mockPrisma.mealItem.aggregate.mockResolvedValue({
+        _sum: { calories: 262, protein: 10, carbs: 50, fat: 2.2 },
+      });
+      mockPrisma.waterLog.aggregate.mockResolvedValue({ _sum: { amount_ml: 0 } });
+      mockPrisma.dailySummary.upsert.mockResolvedValue({});
+
+      const photoUrl = 'https://bucket.s3.us-east-1.amazonaws.com/meals/user-123/photo.jpeg';
+      await service.createFromAI('user-123', 'lunch', undefined, inferredMeal, photoUrl);
+
+      expect(mockPrisma.meal.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            photo_url: photoUrl,
           }),
         }),
       );

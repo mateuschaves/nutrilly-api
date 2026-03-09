@@ -21,6 +21,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MealsService } from './meals.service';
 import { OpenAIService } from '../openai/openai.service';
+import { S3Service } from '../s3/s3.service';
 import { CreateMealDto } from './dto/create-meal.dto';
 import { CreateMealFromPhotoDto } from './dto/create-meal-from-photo.dto';
 import { CreateMealFromDescriptionDto } from './dto/create-meal-from-description.dto';
@@ -33,6 +34,7 @@ export class MealsController {
   constructor(
     private mealsService: MealsService,
     private openAIService: OpenAIService,
+    private s3Service: S3Service,
   ) {}
 
   @Post()
@@ -93,11 +95,18 @@ export class MealsController {
       file.mimetype,
     );
 
+    const photoUrl = await this.s3Service.uploadMealPhoto(
+      req.user.id,
+      file.buffer,
+      file.mimetype,
+    );
+
     return this.mealsService.createFromAI(
       req.user.id,
       dto.name,
       dto.eaten_at,
       inferredMeal,
+      photoUrl,
     );
   }
 
