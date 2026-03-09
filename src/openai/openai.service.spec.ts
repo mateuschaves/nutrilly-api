@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { OpenAIService } from './openai.service';
 
 const mockCreate = jest.fn();
+const mockModerationsCreate = jest.fn();
 
 jest.mock('openai', () => {
   return {
@@ -12,6 +13,9 @@ jest.mock('openai', () => {
         completions: {
           create: mockCreate,
         },
+      },
+      moderations: {
+        create: mockModerationsCreate,
       },
     })),
   };
@@ -143,6 +147,92 @@ describe('OpenAIService', () => {
           response_format: { type: 'json_object' },
         }),
       );
+    });
+  });
+
+  describe('moderatePhoto', () => {
+    it('should return flagged=false for safe content', async () => {
+      mockModerationsCreate.mockResolvedValue({
+        results: [
+          {
+            flagged: false,
+            categories: {
+              sexual: false,
+              hate: false,
+              harassment: false,
+              'self-harm': false,
+              'sexual/minors': false,
+              'hate/threatening': false,
+              'violence/graphic': false,
+              violence: false,
+            },
+          },
+        ],
+      });
+
+      const result = await service.moderatePhoto(
+        Buffer.from('safe-image'),
+        'image/jpeg',
+      );
+
+      expect(result.flagged).toBe(false);
+      expect(result.reason).toBe('');
+      expect(result.categories).toEqual([]);
+      expect(mockModerationsCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'omni-moderation-latest',
+          input: expect.arrayContaining([
+            expect.objectContaining({ type: 'image_url' }),
+          ]),
+        }),
+      );
+    });
+
+    it('should return flagged=true with categories for inappropriate content', async () => {
+      mockModerationsCreate.mockResolvedValue({
+        results: [
+          {
+            flagged: true,
+            categories: {
+              sexual: true,
+              hate: false,
+              harassment: false,
+              'self-harm': false,
+              'sexual/minors': false,
+              'hate/threatening': false,
+              'violence/graphic': true,
+              violence: true,
+            },
+          },
+        ],
+      });
+
+      const result = await service.moderatePhoto(
+        Buffer.from('suspicious-image'),
+        'image/jpeg',
+      );
+
+      expect(result.flagged).toBe(true);
+      expect(result.categories).toContain('sexual');
+      expect(result.categories).toContain('violence/graphic');
+      expect(result.categories).toContain('violence');
+      expect(result.reason).toContain('sexual');
+      expect(result.reason).toContain('violence');
+    });
+
+    it('should return flagged=false when no results are returned', async () => {
+      mockModerationsCreate.mockResolvedValue({
+        results: [],
+      });
+
+      const result = await service.moderatePhoto(
+        Buffer.from('image'),
+        'image/png',
+      );
+
+      expect(result.flagged).toBe(false);
+      expect(result.reason).toBe('');
+      expect(result.categories).toEqual([]);
     });
   });
 });

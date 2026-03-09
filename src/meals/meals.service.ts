@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMealDto } from './dto/create-meal.dto';
-import { InferredMeal } from '../openai/openai.service';
+import { InferredMeal, ModerationResult } from '../openai/openai.service';
 
 @Injectable()
 export class MealsService {
@@ -140,6 +140,19 @@ export class MealsService {
         carbs: mealAgg._sum.carbs || 0,
         fat: mealAgg._sum.fat || 0,
         water_ml: waterAgg._sum.amount_ml || 0,
+      },
+    });
+  }
+
+  async flagSuspiciousPhoto(
+    userId: string,
+    moderation: ModerationResult,
+  ) {
+    return this.prisma.suspiciousPhoto.create({
+      data: {
+        user_id: userId,
+        reason: moderation.reason,
+        categories: moderation.categories.join(', '),
       },
     });
   }

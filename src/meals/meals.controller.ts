@@ -8,6 +8,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -72,6 +73,18 @@ export class MealsController {
     if (!file) {
       throw new BadRequestException(
         'Photo file is required. Please upload an image file (e.g., JPEG, PNG)',
+      );
+    }
+
+    const moderation = await this.openAIService.moderatePhoto(
+      file.buffer,
+      file.mimetype,
+    );
+
+    if (moderation.flagged) {
+      await this.mealsService.flagSuspiciousPhoto(req.user.id, moderation);
+      throw new ForbiddenException(
+        'The uploaded photo was flagged as inappropriate and has been logged for review.',
       );
     }
 

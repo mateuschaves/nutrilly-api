@@ -12,6 +12,7 @@ describe('MealsService', () => {
     mealItem: { aggregate: jest.fn() },
     waterLog: { aggregate: jest.fn() },
     dailySummary: { upsert: jest.fn() },
+    suspiciousPhoto: { create: jest.fn() },
   };
 
   beforeEach(async () => {
@@ -234,6 +235,36 @@ describe('MealsService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('flagSuspiciousPhoto', () => {
+    it('should create a suspicious photo record', async () => {
+      const moderation = {
+        flagged: true,
+        reason: 'Content flagged for: sexual, violence',
+        categories: ['sexual', 'violence'],
+      };
+
+      mockPrisma.suspiciousPhoto.create.mockResolvedValue({
+        id: 'flag-1',
+        user_id: 'user-123',
+        reason: moderation.reason,
+        categories: 'sexual, violence',
+        flagged_at: new Date(),
+      });
+
+      const result = await service.flagSuspiciousPhoto('user-123', moderation);
+
+      expect(mockPrisma.suspiciousPhoto.create).toHaveBeenCalledWith({
+        data: {
+          user_id: 'user-123',
+          reason: 'Content flagged for: sexual, violence',
+          categories: 'sexual, violence',
+        },
+      });
+      expect(result.user_id).toBe('user-123');
+      expect(result.reason).toBe('Content flagged for: sexual, violence');
     });
   });
 });

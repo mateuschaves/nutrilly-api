@@ -15,6 +15,12 @@ export interface InferredMeal {
   items: InferredMealItem[];
 }
 
+export interface ModerationResult {
+  flagged: boolean;
+  reason: string;
+  categories: string[];
+}
+
 const SYSTEM_PROMPT = `You are a nutrition expert. You must analyze meals and estimate their nutritional content.
 Identify EVERY distinct food item present in the meal. If there are multiple foods (e.g. rice, beans, meat, salad, sauce), list EACH one as a separate item in the array with its own estimated weight and macros.
 Return ONLY a valid JSON response with the following structure (no extra text):
@@ -97,5 +103,40 @@ export class OpenAIService {
       throw new Error('No response content from OpenAI');
     }
     return JSON.parse(content) as InferredMeal;
+  }
+
+  async moderatePhoto(
+    imageBuffer: Buffer,
+    mimeType: string,
+  ): Promise<ModerationResult> {
+    const base64Image = imageBuffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64Image}`;
+
+    const response = await this.client.moderations.create({
+      model: 'omni-moderation-latest',
+      input: [
+        {
+          type: 'image_url',
+          image_url: { url: dataUrl },
+        },
+      ],
+    });
+
+    const result = response.results[0];
+    if (!result) {
+      return { flagged: false, reason: '', categories: [] };
+    }
+
+    const flaggedCategories = Object.entries(result.categories)
+      .filter(([, value]) => value === true)
+      .map(([key]) => key);
+
+    return {
+      flagged: result.flagged,
+      reason: flaggedCategories.length > 0
+        ? `Content flagged for: ${flaggedCategories.join(', ')}`
+        : '',
+      categories: flaggedCategories,
+    };
   }
 }
