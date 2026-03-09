@@ -178,7 +178,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid Apple token format');
     }
 
-    const header = JSON.parse(Buffer.from(parts[0], 'base64').toString());
+    let header: { kid?: string };
+    try {
+      header = JSON.parse(Buffer.from(parts[0], 'base64').toString());
+    } catch {
+      throw new UnauthorizedException('Invalid Apple token: unable to decode header');
+    }
+
     const kid = header.kid;
 
     if (!kid) {
@@ -186,9 +192,19 @@ export class AuthService {
     }
 
     // Fetch Apple's public keys
-    const response = await fetch('https://appleid.apple.com/auth/keys');
-    const { keys } = await response.json();
-    const key = keys.find((k: { kid: string }) => k.kid === kid);
+    let keys: { kid: string; n: string; e: string }[];
+    try {
+      const response = await fetch('https://appleid.apple.com/auth/keys');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      keys = data.keys;
+    } catch {
+      throw new UnauthorizedException('Invalid Apple token: failed to fetch Apple public keys');
+    }
+
+    const key = keys.find((k) => k.kid === kid);
 
     if (!key) {
       throw new UnauthorizedException('Invalid Apple token: key not found');
@@ -197,8 +213,13 @@ export class AuthService {
     // Convert the JWK to PEM format
     const publicKey = this.jwkToPem(key);
 
-    // Verify the token
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString()) as AppleTokenPayload;
+    // Verify the token payload
+    let payload: AppleTokenPayload;
+    try {
+      payload = JSON.parse(Buffer.from(parts[1], 'base64').toString()) as AppleTokenPayload;
+    } catch {
+      throw new UnauthorizedException('Invalid Apple token: unable to decode payload');
+    }
 
     // Verify signature
     const signatureValid = crypto.verify(

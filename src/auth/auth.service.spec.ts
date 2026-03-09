@@ -227,7 +227,9 @@ describe('AuthService', () => {
           google_id: 'google-123',
         },
       });
-      expect(mockPrisma.streak.create).toHaveBeenCalled();
+      expect(mockPrisma.streak.create).toHaveBeenCalledWith({
+        data: { user_id: 'new-user-1' },
+      });
       expect(result.access_token).toBe('mock-token');
     });
 
