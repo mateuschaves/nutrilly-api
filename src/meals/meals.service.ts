@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMealDto } from './dto/create-meal.dto';
+import { InferredMeal } from '../openai/openai.service';
 
 @Injectable()
 export class MealsService {
@@ -28,6 +29,55 @@ export class MealsService {
         user_id: userId,
         name: dto.name,
         eaten_at: dto.eaten_at ? new Date(dto.eaten_at) : new Date(),
+        items: { create: mealItems },
+      },
+      include: { items: { include: { food: true } } },
+    });
+
+    await this.updateDailySummary(userId, meal.eaten_at);
+
+    return meal;
+  }
+
+  async createFromAI(
+    userId: string,
+    mealName: string,
+    eatenAt: string | undefined,
+    inferredMeal: InferredMeal,
+  ) {
+    const eatenDate = eatenAt ? new Date(eatenAt) : new Date();
+
+    const foodRecords = await Promise.all(
+      inferredMeal.items.map((item) =>
+        this.prisma.food.create({
+          data: {
+            name: item.name,
+            calories_per_100g: item.calories_per_100g,
+            protein_per_100g: item.protein_per_100g,
+            carbs_per_100g: item.carbs_per_100g,
+            fat_per_100g: item.fat_per_100g,
+          },
+        }),
+      ),
+    );
+
+    const mealItems = inferredMeal.items.map((item, index) => {
+      const factor = item.grams / 100;
+      return {
+        food_id: foodRecords[index].id,
+        grams: item.grams,
+        calories: item.calories_per_100g * factor,
+        protein: item.protein_per_100g * factor,
+        carbs: item.carbs_per_100g * factor,
+        fat: item.fat_per_100g * factor,
+      };
+    });
+
+    const meal = await this.prisma.meal.create({
+      data: {
+        user_id: userId,
+        name: mealName,
+        eaten_at: eatenDate,
         items: { create: mealItems },
       },
       include: { items: { include: { food: true } } },
