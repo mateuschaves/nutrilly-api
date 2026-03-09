@@ -1,15 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { S3Service } from '../s3/s3.service';
 import { CreateMealDto } from './dto/create-meal.dto';
 import { InferredMeal, ModerationResult } from '../openai/openai.service';
 
 @Injectable()
 export class MealsService {
-  constructor(
-    private prisma: PrismaService,
-    private s3Service: S3Service,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateMealDto) {
     const mealItems = await Promise.all(
@@ -91,29 +87,15 @@ export class MealsService {
 
     await this.updateDailySummary(userId, meal.eaten_at);
 
-    return {
-      ...meal,
-      photo_url: meal.photo_url
-        ? await this.s3Service.getSignedPhotoUrl(meal.photo_url)
-        : null,
-    };
+    return meal;
   }
 
   async findUserMeals(userId: string) {
-    const meals = await this.prisma.meal.findMany({
+    return this.prisma.meal.findMany({
       where: { user_id: userId },
       include: { items: { include: { food: true } } },
       orderBy: { eaten_at: 'desc' },
     });
-
-    return Promise.all(
-      meals.map(async (meal) => ({
-        ...meal,
-        photo_url: meal.photo_url
-          ? await this.s3Service.getSignedPhotoUrl(meal.photo_url)
-          : null,
-      })),
-    );
   }
 
   async updateDailySummary(userId: string, date: Date) {

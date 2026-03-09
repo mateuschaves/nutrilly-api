@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MealsService } from './meals.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { S3Service } from '../s3/s3.service';
 import { NotFoundException } from '@nestjs/common';
 
 describe('MealsService', () => {
@@ -16,16 +15,11 @@ describe('MealsService', () => {
     suspiciousPhoto: { create: jest.fn() },
   };
 
-  const mockS3Service = {
-    getSignedPhotoUrl: jest.fn().mockResolvedValue('https://signed-url.example.com/photo.jpeg'),
-  };
-
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MealsService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: S3Service, useValue: mockS3Service },
       ],
     }).compile();
 
@@ -244,7 +238,7 @@ describe('MealsService', () => {
       );
     });
 
-    it('should store photo_url key and return presigned URL', async () => {
+    it('should store photo_url when provided', async () => {
       const inferredMeal = {
         items: [
           {
@@ -259,10 +253,11 @@ describe('MealsService', () => {
       };
 
       mockPrisma.food.create.mockResolvedValue({ id: 'food-ai-4' });
+      const photoUrl = 'https://test-bucket.s3.us-east-1.amazonaws.com/meals/user-123/uuid.jpeg';
       mockPrisma.meal.create.mockResolvedValue({
         id: 'meal-photo-1',
         eaten_at: new Date(),
-        photo_url: 'meals/user-123/photo.jpeg',
+        photo_url: photoUrl,
         items: [],
       });
       mockPrisma.mealItem.aggregate.mockResolvedValue({
@@ -271,49 +266,16 @@ describe('MealsService', () => {
       mockPrisma.waterLog.aggregate.mockResolvedValue({ _sum: { amount_ml: 0 } });
       mockPrisma.dailySummary.upsert.mockResolvedValue({});
 
-      const photoKey = 'meals/user-123/photo.jpeg';
-      const result = await service.createFromAI('user-123', 'lunch', undefined, inferredMeal, photoKey);
+      const result = await service.createFromAI('user-123', 'lunch', undefined, inferredMeal, photoUrl);
 
       expect(mockPrisma.meal.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            photo_url: photoKey,
+            photo_url: photoUrl,
           }),
         }),
       );
-
-      expect(mockS3Service.getSignedPhotoUrl).toHaveBeenCalledWith(photoKey);
-      expect(result.photo_url).toBe('https://signed-url.example.com/photo.jpeg');
-    });
-  });
-
-  describe('findUserMeals', () => {
-    it('should resolve photo_url keys to presigned URLs', async () => {
-      mockPrisma.meal.findMany.mockResolvedValue([
-        {
-          id: 'meal-1',
-          user_id: 'user-123',
-          name: 'lunch',
-          photo_url: 'meals/user-123/photo.jpeg',
-          eaten_at: new Date(),
-          items: [],
-        },
-        {
-          id: 'meal-2',
-          user_id: 'user-123',
-          name: 'dinner',
-          photo_url: null,
-          eaten_at: new Date(),
-          items: [],
-        },
-      ]);
-
-      const meals = await service.findUserMeals('user-123');
-
-      expect(mockS3Service.getSignedPhotoUrl).toHaveBeenCalledTimes(1);
-      expect(mockS3Service.getSignedPhotoUrl).toHaveBeenCalledWith('meals/user-123/photo.jpeg');
-      expect(meals[0].photo_url).toBe('https://signed-url.example.com/photo.jpeg');
-      expect(meals[1].photo_url).toBeNull();
+      expect(result.photo_url).toBe(photoUrl);
     });
   });
 
