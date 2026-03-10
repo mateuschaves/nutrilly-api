@@ -1,16 +1,39 @@
 import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { OAuth2Client } from 'google-auth-library';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
+import { AppleLoginDto } from './dto/apple-login.dto';
+
+interface AppleTokenPayload {
+  iss: string;
+  aud: string;
+  exp: number;
+  iat: number;
+  sub: string;
+  email: string;
+  email_verified: string;
+  auth_time: number;
+}
 
 @Injectable()
 export class AuthService {
+  private googleClient: OAuth2Client;
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.googleClient = new OAuth2Client(
+      this.configService.get<string>('GOOGLE_CLIENT_ID'),
+    );
+  }
 
   async register(dto: RegisterDto) {
     const existing = await this.prisma.user.findUnique({
@@ -36,11 +59,258 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
+    if (!user.password_hash) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
     const valid = await bcrypt.compare(dto.password, user.password_hash);
     if (!valid) {
       throw new UnauthorizedException('Invalid credentials');
     }
     const token = this.jwtService.sign({ sub: user.id, email: user.email });
     return { access_token: token, user: { id: user.id, email: user.email, name: user.name } };
+  }
+
+  async googleLogin(dto: GoogleLoginDto) {
+    const ticket = await this.googleClient.verifyIdToken({
+      idToken: dto.idToken,
+      audience: this.configService.get<string>('GOOGLE_CLIENT_ID'),
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload) {
+      throw new UnauthorizedException('Invalid Google token');
+    }
+
+    const { sub: googleId, email, name } = payload;
+
+    if (!email) {
+      throw new UnauthorizedException('Google account does not have an email');
+    }
+
+    // Check if user exists with this Google ID
+    let user = await this.prisma.user.findUnique({
+      where: { google_id: googleId },
+    });
+
+    if (!user) {
+      // Check if user exists with this email
+      user = await this.prisma.user.findUnique({
+        where: { email },
+      });
+
+      if (user) {
+        // Link Google account to existing user
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { google_id: googleId },
+        });
+      } else {
+        // Create new user
+        user = await this.prisma.user.create({
+          data: {
+            email,
+            name: name || 'Google User',
+            google_id: googleId,
+          },
+        });
+        // Create default streak record
+        await this.prisma.streak.create({
+          data: { user_id: user.id },
+        });
+      }
+    }
+
+    const token = this.jwtService.sign({ sub: user.id, email: user.email });
+    return { access_token: token, user: { id: user.id, email: user.email, name: user.name } };
+  }
+
+  async appleLogin(dto: AppleLoginDto) {
+    const applePayload = await this.verifyAppleToken(dto.identityToken);
+
+    const { sub: appleId, email } = applePayload;
+
+    if (!email) {
+      throw new UnauthorizedException('Apple account does not have an email');
+    }
+
+    // Check if user exists with this Apple ID
+    let user = await this.prisma.user.findUnique({
+      where: { apple_id: appleId },
+    });
+
+    if (!user) {
+      // Check if user exists with this email
+      user = await this.prisma.user.findUnique({
+        where: { email },
+      });
+
+      if (user) {
+        // Link Apple account to existing user
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { apple_id: appleId },
+        });
+      } else {
+        // Create new user
+        // Note: Apple only provides name on first sign-in, so we use the provided fullName or a default
+        user = await this.prisma.user.create({
+          data: {
+            email,
+            name: dto.fullName || 'Apple User',
+            apple_id: appleId,
+          },
+        });
+        // Create default streak record
+        await this.prisma.streak.create({
+          data: { user_id: user.id },
+        });
+      }
+    }
+
+    const token = this.jwtService.sign({ sub: user.id, email: user.email });
+    return { access_token: token, user: { id: user.id, email: user.email, name: user.name } };
+  }
+
+  private async verifyAppleToken(identityToken: string): Promise<AppleTokenPayload> {
+    // Decode the JWT header to get the key ID
+    const parts = identityToken.split('.');
+    if (parts.length !== 3) {
+      throw new UnauthorizedException('Invalid Apple token format');
+    }
+
+    let header: { kid?: string };
+    try {
+      header = JSON.parse(Buffer.from(parts[0], 'base64').toString());
+    } catch {
+      throw new UnauthorizedException('Invalid Apple token: unable to decode header');
+    }
+
+    const kid = header.kid;
+
+    if (!kid) {
+      throw new UnauthorizedException('Invalid Apple token: missing key ID');
+    }
+
+    // Fetch Apple's public keys
+    let keys: { kid: string; n: string; e: string }[];
+    try {
+      const response = await fetch('https://appleid.apple.com/auth/keys');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      keys = data.keys;
+    } catch {
+      throw new UnauthorizedException('Invalid Apple token: failed to fetch Apple public keys');
+    }
+
+    const key = keys.find((k) => k.kid === kid);
+
+    if (!key) {
+      throw new UnauthorizedException('Invalid Apple token: key not found');
+    }
+
+    // Convert the JWK to PEM format
+    const publicKey = this.jwkToPem(key);
+
+    // Verify the token payload
+    let payload: AppleTokenPayload;
+    try {
+      payload = JSON.parse(Buffer.from(parts[1], 'base64').toString()) as AppleTokenPayload;
+    } catch {
+      throw new UnauthorizedException('Invalid Apple token: unable to decode payload');
+    }
+
+    // Verify signature
+    const signatureValid = crypto.verify(
+      'RSA-SHA256',
+      Buffer.from(`${parts[0]}.${parts[1]}`),
+      publicKey,
+      Buffer.from(parts[2], 'base64url'),
+    );
+
+    if (!signatureValid) {
+      throw new UnauthorizedException('Invalid Apple token: signature verification failed');
+    }
+
+    // Verify claims
+    const now = Math.floor(Date.now() / 1000);
+    const appleClientId = this.configService.get<string>('APPLE_CLIENT_ID');
+
+    if (payload.iss !== 'https://appleid.apple.com') {
+      throw new UnauthorizedException('Invalid Apple token: invalid issuer');
+    }
+
+    if (payload.aud !== appleClientId) {
+      throw new UnauthorizedException('Invalid Apple token: invalid audience');
+    }
+
+    if (payload.exp < now) {
+      throw new UnauthorizedException('Invalid Apple token: token expired');
+    }
+
+    return payload;
+  }
+
+  private jwkToPem(jwk: { n: string; e: string }): string {
+    // Convert the JWK RSA public key to PEM format
+    const n = Buffer.from(jwk.n, 'base64url');
+    const e = Buffer.from(jwk.e, 'base64url');
+
+    // DER encode the RSA public key
+    const nLen = n.length;
+    const eLen = e.length;
+
+    // ASN.1 sequence for RSA public key
+    const rsaPublicKey = Buffer.concat([
+      Buffer.from([0x30]), // SEQUENCE
+      this.encodeLength(nLen + eLen + 4 + (n[0] & 0x80 ? 1 : 0) + (e[0] & 0x80 ? 1 : 0)),
+      Buffer.from([0x02]), // INTEGER (n)
+      this.encodeLength(nLen + (n[0] & 0x80 ? 1 : 0)),
+      n[0] & 0x80 ? Buffer.from([0x00]) : Buffer.alloc(0),
+      n,
+      Buffer.from([0x02]), // INTEGER (e)
+      this.encodeLength(eLen + (e[0] & 0x80 ? 1 : 0)),
+      e[0] & 0x80 ? Buffer.from([0x00]) : Buffer.alloc(0),
+      e,
+    ]);
+
+    // Wrap in SubjectPublicKeyInfo structure
+    const algorithmIdentifier = Buffer.from([
+      0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+      0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+    ]);
+
+    const bitString = Buffer.concat([
+      Buffer.from([0x03]),
+      this.encodeLength(rsaPublicKey.length + 1),
+      Buffer.from([0x00]),
+      rsaPublicKey,
+    ]);
+
+    const spki = Buffer.concat([
+      Buffer.from([0x30]),
+      this.encodeLength(algorithmIdentifier.length + bitString.length),
+      algorithmIdentifier,
+      bitString,
+    ]);
+
+    // Convert to PEM format
+    const base64 = spki.toString('base64');
+    const lines = base64.match(/.{1,64}/g) || [];
+    return `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----`;
+  }
+
+  private encodeLength(length: number): Buffer {
+    if (length < 128) {
+      return Buffer.from([length]);
+    }
+    const bytes: number[] = [];
+    let temp = length;
+    while (temp > 0) {
+      bytes.unshift(temp & 0xff);
+      temp = temp >> 8;
+    }
+    return Buffer.from([0x80 | bytes.length, ...bytes]);
   }
 }

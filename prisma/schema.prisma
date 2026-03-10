@@ -10,8 +10,10 @@ datasource db {
 model User {
   id            String   @id @default(uuid())
   email         String   @unique
-  password_hash String
+  password_hash String?
   name          String
+  google_id     String?  @unique
+  apple_id      String?  @unique
   created_at    DateTime @default(now())
 
   goals          UserGoal?
