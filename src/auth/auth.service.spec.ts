@@ -130,22 +130,23 @@ describe('AuthService', () => {
   });
 
   describe('googleLogin', () => {
-    it('should return token for existing user with Google ID', async () => {
+    it('should return token for existing user with Google ID and preserve user name', async () => {
       const mockTicket = {
         getPayload: () => ({
           sub: 'google-123',
           email: 'john@example.com',
-          name: 'John Doe',
+          name: 'Google Name', // Google returns a different name
         }),
       };
       jest
         .spyOn(service['googleClient'], 'verifyIdToken')
         .mockResolvedValue(mockTicket as never);
 
+      // User has edited their name in the app to "Custom Name"
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
         email: 'john@example.com',
-        name: 'John',
+        name: 'Custom Name',
         google_id: 'google-123',
       });
 
@@ -153,14 +154,18 @@ describe('AuthService', () => {
 
       expect(result.access_token).toBe('mock-token');
       expect(result.user.email).toBe('john@example.com');
+      // Name should be preserved from DB, not overwritten by Google's name
+      expect(result.user.name).toBe('Custom Name');
+      // user.update should NOT be called for existing users
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
-    it('should link Google account to existing user with same email', async () => {
+    it('should link Google account to existing user with same email and preserve user name', async () => {
       const mockTicket = {
         getPayload: () => ({
           sub: 'google-123',
           email: 'john@example.com',
-          name: 'John Doe',
+          name: 'Google Name', // Google returns a different name
         }),
       };
       jest
@@ -168,28 +173,31 @@ describe('AuthService', () => {
         .mockResolvedValue(mockTicket as never);
 
       // First call: no user with Google ID
-      // Second call: user exists with email
+      // Second call: user exists with email (user has custom name)
       mockPrisma.user.findUnique
         .mockResolvedValueOnce(null) // google_id search
         .mockResolvedValueOnce({
           id: 'user-1',
           email: 'john@example.com',
-          name: 'John',
+          name: 'Custom Name',
         }); // email search
 
       mockPrisma.user.update.mockResolvedValue({
         id: 'user-1',
         email: 'john@example.com',
-        name: 'John',
+        name: 'Custom Name',
         google_id: 'google-123',
       });
 
       const result = await service.googleLogin({ idToken: 'valid-google-token' });
 
+      // Should only update google_id, NOT name
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
         data: { google_id: 'google-123' },
       });
+      // Name should be preserved
+      expect(result.user.name).toBe('Custom Name');
       expect(result.access_token).toBe('mock-token');
     });
 
