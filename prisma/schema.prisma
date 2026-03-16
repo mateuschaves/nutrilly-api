@@ -8,140 +8,98 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  password_hash String?
-  name          String
-  google_id     String?  @unique
-  apple_id      String?  @unique
-  created_at    DateTime @default(now())
-
-  goals          UserGoal?
-  preferences    UserPreferences?
-  meals          Meal[]
-  waterLogs      WaterLog[]
-  dailySummaries DailySummary[]
-  streak         Streak?
-  suspiciousPhotos SuspiciousPhoto[]
+  id               String               @id @default(cuid())
+  email            String               @unique
+  name             String
+  passwordHash     String?
+  googleId         String?              @unique
+  appleId          String?              @unique
+  unitPreferences  UserUnitPreferences?
+  profile          UserProfile?
+  meals            Meal[]
+  diaryEntries     DiaryEntry[]
+  hydrationEntries HydrationEntry[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
   @@map("users")
 }
 
-model UserGoal {
-  id            String @id @default(uuid())
-  user_id       String @unique
-  calories_goal Float
-  protein_goal  Float
-  carbs_goal    Float
-  fat_goal      Float
-  water_goal_ml Float
+model UserUnitPreferences {
+  userId String @id
+  energy String @default("kcal") // "kcal" | "kj"
+  water  String @default("l")    // "l" | "fl_oz"
+  weight String @default("kg")   // "kg" | "lbs"
+  height String @default("cm")   // "cm" | "ft_in"
 
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("user_goals")
+  @@map("user_unit_preferences")
 }
 
-model UserPreferences {
-  id          String @id @default(uuid())
-  user_id     String @unique
-  energy_unit String @default("kcal")
-  water_unit  String @default("l")
+model UserProfile {
+  userId        String  @id
+  birthdate     String? // YYYY-MM-DD
+  sex           String? // "male" | "female"
+  weightKg      Float?
+  heightCm      Float?
+  goal          String? // "lose_weight" | "maintain" | "gain_muscle"
+  activityLevel String? // "sedentary" | "lightly_active" | "active" | "very_active"
+  caloriesGoal  Int     @default(2200) // always kcal internally
+  proteinGoalG  Float   @default(150)
+  carbsGoalG    Float   @default(250)
+  fatGoalG      Float   @default(70)
+  waterGoalMl   Int     @default(2600) // always ml internally
 
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("user_preferences")
-}
-
-model Food {
-  id                String @id @default(uuid())
-  name              String
-  calories_per_100g Float
-  protein_per_100g  Float
-  carbs_per_100g    Float
-  fat_per_100g      Float
-
-  mealItems MealItem[]
-
-  @@map("foods")
+  @@map("user_profiles")
 }
 
 model Meal {
-  id         String   @id @default(uuid())
-  user_id    String
-  name       String
-  photo_url  String?
-  eaten_at   DateTime @default(now())
-  created_at DateTime @default(now())
+  id           String       @id @default(cuid())
+  userId       String
+  name         String
+  icon         String
+  sortOrder    Int          @default(0)
+  diaryEntries DiaryEntry[]
 
-  user  User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  items MealItem[]
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("meals")
 }
 
-model MealItem {
-  id       String @id @default(uuid())
-  meal_id  String
-  food_id  String
-  grams    Float
-  calories Float
-  protein  Float
-  carbs    Float
-  fat      Float
+model DiaryEntry {
+  id       String   @id @default(cuid())
+  userId   String
+  mealId   String
+  date     String   // YYYY-MM-DD
+  name     String
+  kcal     Int
+  proteinG Float
+  carbsG   Float
+  fatG     Float
+  portion  String
+  photoUri String?
+  loggedAt DateTime @default(now())
 
-  meal Meal @relation(fields: [meal_id], references: [id], onDelete: Cascade)
-  food Food @relation(fields: [food_id], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meal Meal @relation(fields: [mealId], references: [id], onDelete: Cascade)
 
-  @@map("meal_items")
+  @@index([userId, date])
+  @@map("diary_entries")
 }
 
-model WaterLog {
-  id        String   @id @default(uuid())
-  user_id   String
-  amount_ml Float
-  logged_at DateTime @default(now())
+model HydrationEntry {
+  id       String   @id @default(cuid())
+  userId   String
+  date     String   // YYYY-MM-DD
+  amountMl Int
+  loggedAt DateTime @default(now())
 
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("water_logs")
-}
-
-model DailySummary {
-  id       String   @id @default(uuid())
-  user_id  String
-  date     DateTime @db.Date
-  calories Float    @default(0)
-  protein  Float    @default(0)
-  carbs    Float    @default(0)
-  fat      Float    @default(0)
-  water_ml Float    @default(0)
-
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([user_id, date])
-  @@map("daily_summaries")
-}
-
-model Streak {
-  id                 String    @id @default(uuid())
-  user_id            String    @unique
-  current_streak     Int       @default(0)
-  best_streak        Int       @default(0)
-  last_goal_hit_date DateTime? @db.Date
-
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@map("streaks")
-}
-
-model SuspiciousPhoto {
-  id          String   @id @default(uuid())
-  user_id     String
-  reason      String
-  categories  String
-  flagged_at  DateTime @default(now())
-
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@map("suspicious_photos")
+  @@index([userId, date])
+  @@map("hydration_entries")
 }

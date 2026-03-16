@@ -1,163 +1,111 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UnitsService } from '../units/units.service';
+import { EnergyUnit, WaterUnit } from '../units/units.types';
 
-const KCAL_TO_KJ = 4.184;
-const ML_TO_FL_OZ = 0.033814;
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 @Injectable()
 export class DashboardService {
-  constructor(private prisma: PrismaService) {}
-
-  async getTodayDashboard(userId: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
-    const [goals, summary, waterAgg, lastMeal, streak] = await Promise.all([
-      this.prisma.userGoal.findUnique({ where: { user_id: userId } }),
-      this.prisma.dailySummary.findUnique({
-        where: { user_id_date: { user_id: userId, date: today } },
-      }),
-      this.prisma.waterLog.aggregate({
-        where: { user_id: userId, logged_at: { gte: today, lte: todayEnd } },
-        _sum: { amount_ml: true },
-      }),
-      this.prisma.meal.findFirst({
-        where: { user_id: userId },
-        orderBy: { eaten_at: 'desc' },
-        include: { items: { select: { calories: true } } },
-      }),
-      this.prisma.streak.findUnique({ where: { user_id: userId } }),
-    ]);
-
-    const caloriesConsumed = summary?.calories || 0;
-    const caloriesGoal = goals?.calories_goal || 0;
-    const caloriesRemaining = Math.max(0, caloriesGoal - caloriesConsumed);
-    const caloriesProgress =
-      caloriesGoal > 0 ? Math.min(100, (caloriesConsumed / caloriesGoal) * 100) : 0;
-
-    const waterConsumed = waterAgg._sum.amount_ml || 0;
-    const waterGoal = goals?.water_goal_ml || 0;
-    const waterProgress = waterGoal > 0 ? Math.min(100, (waterConsumed / waterGoal) * 100) : 0;
-
-    const lastMealCalories = lastMeal?.items.reduce((sum, i) => sum + i.calories, 0) || 0;
-
-    const currentStreak = streak?.current_streak || 0;
-    const bestStreak = streak?.best_streak || 0;
-    const daysToRecord = Math.max(0, bestStreak - currentStreak);
-
-    return {
-      date: new Date().toISOString().split('T')[0],
-      calories: {
-        consumed: caloriesConsumed,
-        goal: caloriesGoal,
-        remaining: caloriesRemaining,
-        progress_percent: Math.round(caloriesProgress * 10) / 10,
-      },
-      macros: {
-        protein: {
-          consumed: summary?.protein || 0,
-          goal: goals?.protein_goal || 0,
-        },
-        carbs: {
-          consumed: summary?.carbs || 0,
-          goal: goals?.carbs_goal || 0,
-        },
-        fat: {
-          consumed: summary?.fat || 0,
-          goal: goals?.fat_goal || 0,
-        },
-      },
-      hydration: {
-        consumed_ml: waterConsumed,
-        goal_ml: waterGoal,
-        progress_percent: Math.round(waterProgress * 10) / 10,
-      },
-      last_meal: lastMeal
-        ? {
-            name: lastMeal.name,
-            calories: Math.round(lastMealCalories * 10) / 10,
-            eaten_at: lastMeal.eaten_at,
-          }
-        : null,
-      streak: {
-        current_streak: currentStreak,
-        best_streak: bestStreak,
-        days_to_record: daysToRecord,
-      },
-    };
-  }
+  constructor(
+    private prisma: PrismaService,
+    private unitsService: UnitsService,
+  ) {}
 
   async getDailySummary(userId: string, date: string) {
-    const dateStart = new Date(`${date}T00:00:00.000Z`);
-    const dateEnd = new Date(`${date}T23:59:59.999Z`);
+    if (!DATE_REGEX.test(date)) throw new BadRequestException('Invalid date format. Use YYYY-MM-DD');
 
-    const [goals, prefs, summary, waterAgg, lastMeal, streak] = await Promise.all([
-      this.prisma.userGoal.findUnique({ where: { user_id: userId } }),
-      this.prisma.userPreferences.findUnique({ where: { user_id: userId } }),
-      this.prisma.dailySummary.findUnique({
-        where: { user_id_date: { user_id: userId, date: dateStart } },
+    const [units, profile, diaryAgg, hydrationAgg, lastEntry] = await Promise.all([
+      this.unitsService.getUserUnits(userId),
+      this.prisma.userProfile.findUnique({ where: { userId } }),
+      this.prisma.diaryEntry.aggregate({
+        where: { userId, date },
+        _sum: { kcal: true, proteinG: true, carbsG: true, fatG: true },
       }),
-      this.prisma.waterLog.aggregate({
-        where: { user_id: userId, logged_at: { gte: dateStart, lte: dateEnd } },
-        _sum: { amount_ml: true },
+      this.prisma.hydrationEntry.aggregate({
+        where: { userId, date },
+        _sum: { amountMl: true },
       }),
-      this.prisma.meal.findFirst({
-        where: { user_id: userId, eaten_at: { gte: dateStart, lte: dateEnd } },
-        orderBy: { eaten_at: 'desc' },
-        include: { items: { select: { calories: true } } },
+      this.prisma.diaryEntry.findFirst({
+        where: { userId, date },
+        orderBy: { loggedAt: 'desc' },
       }),
-      this.prisma.streak.findUnique({ where: { user_id: userId } }),
     ]);
 
-    const energyUnit = (prefs?.energy_unit ?? 'kcal') as 'kcal' | 'kj';
-    const waterUnit = (prefs?.water_unit ?? 'l') as 'l' | 'fl_oz';
+    const energyUnit = units.energy as EnergyUnit;
+    const waterUnit = units.water as WaterUnit;
 
-    const toEnergy = (kcal: number) =>
-      energyUnit === 'kj' ? Math.round(kcal * KCAL_TO_KJ) : Math.round(kcal);
+    const totalKcal = diaryAgg._sum.kcal ?? 0;
+    const totalProtein = diaryAgg._sum.proteinG ?? 0;
+    const totalCarbs = diaryAgg._sum.carbsG ?? 0;
+    const totalFat = diaryAgg._sum.fatG ?? 0;
+    const totalWaterMl = hydrationAgg._sum.amountMl ?? 0;
 
-    const toWater = (ml: number) =>
-      waterUnit === 'fl_oz'
-        ? parseFloat((ml * ML_TO_FL_OZ).toFixed(1))
-        : parseFloat((ml / 1000).toFixed(2));
+    const caloriesGoal = profile?.caloriesGoal ?? 0;
+    const waterGoalMl = profile?.waterGoalMl ?? 0;
 
-    const totalKcal = summary?.calories ?? 0;
-    const totalProteinG = summary?.protein ?? 0;
-    const totalCarbsG = summary?.carbs ?? 0;
-    const totalFatG = summary?.fat ?? 0;
-    const totalWaterMl = waterAgg._sum.amount_ml ?? 0;
-
-    const lastMealCalories = lastMeal?.items.reduce((sum, i) => sum + i.calories, 0) ?? 0;
-    const hoursAgo = lastMeal
-      ? Math.floor((Date.now() - lastMeal.eaten_at.getTime()) / 3_600_000)
+    const hoursAgo = lastEntry
+      ? Math.floor((Date.now() - lastEntry.loggedAt.getTime()) / 3_600_000)
       : 0;
+
+    const streak = await this.computeStreak(userId, date);
 
     return {
       calories: {
-        consumed: toEnergy(totalKcal),
-        goal: toEnergy(goals?.calories_goal ?? 0),
+        consumed: this.unitsService.convertEnergy(totalKcal, energyUnit),
+        goal: this.unitsService.convertEnergy(caloriesGoal, energyUnit),
         unit: energyUnit,
       },
       macros: [
-        { label: 'Protein', value: Math.round(totalProteinG), unit: 'g', accentColor: 'rgba(100,220,180,0.22)' },
-        { label: 'Carbs',   value: Math.round(totalCarbsG),   unit: 'g', accentColor: 'rgba(255,200,80,0.22)'  },
-        { label: 'Fat',     value: Math.round(totalFatG),     unit: 'g', accentColor: 'rgba(255,100,150,0.22)' },
+        { label: 'Protein', value: Math.round(totalProtein), unit: 'g', type: 'protein' },
+        { label: 'Carbs',   value: Math.round(totalCarbs),   unit: 'g', type: 'carbs'   },
+        { label: 'Fat',     value: Math.round(totalFat),     unit: 'g', type: 'fat'     },
       ],
       water: {
-        consumed: toWater(totalWaterMl),
-        goal: toWater(goals?.water_goal_ml ?? 0),
+        consumed: this.unitsService.convertWater(totalWaterMl, waterUnit),
+        goal: this.unitsService.convertWater(waterGoalMl, waterUnit),
         unit: waterUnit,
       },
-      lastMeal: lastMeal
+      lastMeal: lastEntry
         ? {
-            name: lastMeal.name,
-            calories: toEnergy(lastMealCalories),
+            name: lastEntry.name,
+            calories: this.unitsService.convertEnergy(lastEntry.kcal, energyUnit),
             unit: energyUnit,
             hoursAgo,
           }
         : null,
-      streak: streak?.current_streak ?? 0,
+      streak,
     };
+  }
+
+  async computeStreak(userId: string, referenceDate: string): Promise<number> {
+    const rows = await this.prisma.diaryEntry.findMany({
+      where: { userId },
+      select: { date: true },
+      distinct: ['date'],
+      orderBy: { date: 'desc' },
+    });
+
+    if (rows.length === 0) return 0;
+
+    const today = referenceDate;
+    const yesterday = new Date(new Date(today).getTime() - 86_400_000)
+      .toISOString()
+      .split('T')[0];
+
+    const dates = rows.map((r) => r.date);
+    if (dates[0] !== today && dates[0] !== yesterday) return 0;
+
+    let streak = 1;
+    for (let i = 1; i < dates.length; i++) {
+      const prev = new Date(dates[i - 1]).getTime();
+      const curr = new Date(dates[i]).getTime();
+      if (Math.round((prev - curr) / 86_400_000) === 1) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
   }
 }
