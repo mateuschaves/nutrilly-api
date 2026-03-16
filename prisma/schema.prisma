@@ -17,6 +17,7 @@ model User {
   created_at    DateTime @default(now())
 
   goals          UserGoal?
+  preferences    UserPreferences?
   meals          Meal[]
   waterLogs      WaterLog[]
   dailySummaries DailySummary[]
@@ -38,6 +39,17 @@ model UserGoal {
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("user_goals")
+}
+
+model UserPreferences {
+  id          String @id @default(uuid())
+  user_id     String @unique
+  energy_unit String @default("kcal")
+  water_unit  String @default("l")
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
 }
 
 model Food {
