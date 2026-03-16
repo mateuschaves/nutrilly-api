@@ -93,8 +93,9 @@ export class DashboardService {
     const dateStart = new Date(`${date}T00:00:00.000Z`);
     const dateEnd = new Date(`${date}T23:59:59.999Z`);
 
-    const [goals, summary, waterAgg, lastMeal, streak] = await Promise.all([
+    const [goals, prefs, summary, waterAgg, lastMeal, streak] = await Promise.all([
       this.prisma.userGoal.findUnique({ where: { user_id: userId } }),
+      this.prisma.userPreferences.findUnique({ where: { user_id: userId } }),
       this.prisma.dailySummary.findUnique({
         where: { user_id_date: { user_id: userId, date: dateStart } },
       }),
@@ -110,8 +111,8 @@ export class DashboardService {
       this.prisma.streak.findUnique({ where: { user_id: userId } }),
     ]);
 
-    const energyUnit = (goals?.energy_unit ?? 'kcal') as 'kcal' | 'kj';
-    const waterUnit = (goals?.water_unit ?? 'l') as 'l' | 'fl_oz';
+    const energyUnit = (prefs?.energy_unit ?? 'kcal') as 'kcal' | 'kj';
+    const waterUnit = (prefs?.water_unit ?? 'l') as 'l' | 'fl_oz';
 
     const toEnergy = (kcal: number) =>
       energyUnit === 'kj' ? Math.round(kcal * KCAL_TO_KJ) : Math.round(kcal);
