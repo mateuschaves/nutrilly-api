@@ -82,4 +82,41 @@ describe('StreaksService', () => {
 
     expect(mockPrisma.streak.update).not.toHaveBeenCalled();
   });
+
+  it('getStreak() should return streak for the user', async () => {
+    const streak = { id: 'streak-1', user_id: 'user-1', current_streak: 7, best_streak: 14 };
+    mockPrisma.streak.findUnique.mockResolvedValue(streak);
+
+    const result = await service.getStreak('user-1');
+
+    expect(mockPrisma.streak.findUnique).toHaveBeenCalledWith({ where: { user_id: 'user-1' } });
+    expect(result).toEqual(streak);
+  });
+
+  it('runDailyStreakCheck() should process all users in batches', async () => {
+    // First batch: exactly 100 users (full batch → triggers next iteration)
+    const fullBatch = Array.from({ length: 100 }, (_, i) => ({ id: `user-${i}` }));
+    mockPrisma.user.findMany
+      .mockResolvedValueOnce(fullBatch)
+      .mockResolvedValueOnce([]);
+    mockPrisma.userGoal.findUnique.mockResolvedValue(null);
+    mockPrisma.dailySummary.findUnique.mockResolvedValue(null);
+    mockPrisma.streak.findUnique.mockResolvedValue(null);
+
+    await service.runDailyStreakCheck();
+
+    expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('runDailyStreakCheck() should stop when batch is smaller than batch size', async () => {
+    const smallBatch = Array.from({ length: 5 }, (_, i) => ({ id: `user-${i}` }));
+    mockPrisma.user.findMany.mockResolvedValueOnce(smallBatch);
+    mockPrisma.userGoal.findUnique.mockResolvedValue(null);
+    mockPrisma.dailySummary.findUnique.mockResolvedValue(null);
+    mockPrisma.streak.findUnique.mockResolvedValue(null);
+
+    await service.runDailyStreakCheck();
+
+    expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1);
+  });
 });
