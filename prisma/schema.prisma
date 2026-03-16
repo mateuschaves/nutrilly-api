@@ -34,6 +34,8 @@ model UserGoal {
   carbs_goal    Float
   fat_goal      Float
   water_goal_ml Float
+  energy_unit   String @default("kcal")
+  water_unit    String @default("l")
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 

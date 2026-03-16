@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+const KCAL_TO_KJ = 4.184;
+const ML_TO_FL_OZ = 0.033814;
+
 @Injectable()
 export class DashboardService {
   constructor(private prisma: PrismaService) {}
@@ -83,6 +86,77 @@ export class DashboardService {
         best_streak: bestStreak,
         days_to_record: daysToRecord,
       },
+    };
+  }
+
+  async getDailySummary(userId: string, date: string) {
+    const dateStart = new Date(`${date}T00:00:00.000Z`);
+    const dateEnd = new Date(`${date}T23:59:59.999Z`);
+
+    const [goals, summary, waterAgg, lastMeal, streak] = await Promise.all([
+      this.prisma.userGoal.findUnique({ where: { user_id: userId } }),
+      this.prisma.dailySummary.findUnique({
+        where: { user_id_date: { user_id: userId, date: dateStart } },
+      }),
+      this.prisma.waterLog.aggregate({
+        where: { user_id: userId, logged_at: { gte: dateStart, lte: dateEnd } },
+        _sum: { amount_ml: true },
+      }),
+      this.prisma.meal.findFirst({
+        where: { user_id: userId, eaten_at: { gte: dateStart, lte: dateEnd } },
+        orderBy: { eaten_at: 'desc' },
+        include: { items: { select: { calories: true } } },
+      }),
+      this.prisma.streak.findUnique({ where: { user_id: userId } }),
+    ]);
+
+    const energyUnit = (goals?.energy_unit ?? 'kcal') as 'kcal' | 'kj';
+    const waterUnit = (goals?.water_unit ?? 'l') as 'l' | 'fl_oz';
+
+    const toEnergy = (kcal: number) =>
+      energyUnit === 'kj' ? Math.round(kcal * KCAL_TO_KJ) : Math.round(kcal);
+
+    const toWater = (ml: number) =>
+      waterUnit === 'fl_oz'
+        ? parseFloat((ml * ML_TO_FL_OZ).toFixed(1))
+        : parseFloat((ml / 1000).toFixed(2));
+
+    const totalKcal = summary?.calories ?? 0;
+    const totalProteinG = summary?.protein ?? 0;
+    const totalCarbsG = summary?.carbs ?? 0;
+    const totalFatG = summary?.fat ?? 0;
+    const totalWaterMl = waterAgg._sum.amount_ml ?? 0;
+
+    const lastMealCalories = lastMeal?.items.reduce((sum, i) => sum + i.calories, 0) ?? 0;
+    const hoursAgo = lastMeal
+      ? Math.floor((Date.now() - lastMeal.eaten_at.getTime()) / 3_600_000)
+      : 0;
+
+    return {
+      calories: {
+        consumed: toEnergy(totalKcal),
+        goal: toEnergy(goals?.calories_goal ?? 0),
+        unit: energyUnit,
+      },
+      macros: [
+        { label: 'Protein', value: Math.round(totalProteinG), unit: 'g', accentColor: 'rgba(100,220,180,0.22)' },
+        { label: 'Carbs',   value: Math.round(totalCarbsG),   unit: 'g', accentColor: 'rgba(255,200,80,0.22)'  },
+        { label: 'Fat',     value: Math.round(totalFatG),     unit: 'g', accentColor: 'rgba(255,100,150,0.22)' },
+      ],
+      water: {
+        consumed: toWater(totalWaterMl),
+        goal: toWater(goals?.water_goal_ml ?? 0),
+        unit: waterUnit,
+      },
+      lastMeal: lastMeal
+        ? {
+            name: lastMeal.name,
+            calories: toEnergy(lastMealCalories),
+            unit: energyUnit,
+            hoursAgo,
+          }
+        : null,
+      streak: streak?.current_streak ?? 0,
     };
   }
 }
