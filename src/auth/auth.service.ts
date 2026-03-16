@@ -5,6 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { MealsService } from '../meals/meals.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
@@ -29,6 +30,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private mealsService: MealsService,
   ) {
     this.googleClient = new OAuth2Client(
       this.configService.get<string>('GOOGLE_CLIENT_ID'),
@@ -42,14 +44,11 @@ export class AuthService {
     if (existing) {
       throw new ConflictException('Email already in use');
     }
-    const password_hash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await bcrypt.hash(dto.password, 10);
     const user = await this.prisma.user.create({
-      data: { name: dto.name, email: dto.email, password_hash },
+      data: { name: dto.name, email: dto.email, passwordHash },
     });
-    // Create default streak record
-    await this.prisma.streak.create({
-      data: { user_id: user.id },
-    });
+    await this.mealsService.seedDefaultMeals(user.id);
     const token = this.jwtService.sign({ sub: user.id, email: user.email });
     return { access_token: token, user: { id: user.id, email: user.email, name: user.name } };
   }
@@ -59,10 +58,10 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    if (!user.password_hash) {
+    if (!user.passwordHash) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    const valid = await bcrypt.compare(dto.password, user.password_hash);
+    const valid = await bcrypt.compare(dto.password, user.passwordHash);
     if (!valid) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -87,36 +86,21 @@ export class AuthService {
       throw new UnauthorizedException('Google account does not have an email');
     }
 
-    // Check if user exists with this Google ID
-    let user = await this.prisma.user.findUnique({
-      where: { google_id: googleId },
-    });
+    let user = await this.prisma.user.findUnique({ where: { googleId } });
 
     if (!user) {
-      // Check if user exists with this email
-      user = await this.prisma.user.findUnique({
-        where: { email },
-      });
+      user = await this.prisma.user.findUnique({ where: { email } });
 
       if (user) {
-        // Link Google account to existing user
         user = await this.prisma.user.update({
           where: { id: user.id },
-          data: { google_id: googleId },
+          data: { googleId },
         });
       } else {
-        // Create new user
         user = await this.prisma.user.create({
-          data: {
-            email,
-            name: name || 'Google User',
-            google_id: googleId,
-          },
+          data: { email, name: name || 'Google User', googleId },
         });
-        // Create default streak record
-        await this.prisma.streak.create({
-          data: { user_id: user.id },
-        });
+        await this.mealsService.seedDefaultMeals(user.id);
       }
     }
 
@@ -133,37 +117,21 @@ export class AuthService {
       throw new UnauthorizedException('Apple account does not have an email');
     }
 
-    // Check if user exists with this Apple ID
-    let user = await this.prisma.user.findUnique({
-      where: { apple_id: appleId },
-    });
+    let user = await this.prisma.user.findUnique({ where: { appleId } });
 
     if (!user) {
-      // Check if user exists with this email
-      user = await this.prisma.user.findUnique({
-        where: { email },
-      });
+      user = await this.prisma.user.findUnique({ where: { email } });
 
       if (user) {
-        // Link Apple account to existing user
         user = await this.prisma.user.update({
           where: { id: user.id },
-          data: { apple_id: appleId },
+          data: { appleId },
         });
       } else {
-        // Create new user
-        // Note: Apple only provides name on first sign-in, so we use the provided fullName or a default
         user = await this.prisma.user.create({
-          data: {
-            email,
-            name: dto.fullName || 'Apple User',
-            apple_id: appleId,
-          },
+          data: { email, name: dto.fullName || 'Apple User', appleId },
         });
-        // Create default streak record
-        await this.prisma.streak.create({
-          data: { user_id: user.id },
-        });
+        await this.mealsService.seedDefaultMeals(user.id);
       }
     }
 
@@ -172,7 +140,6 @@ export class AuthService {
   }
 
   private async verifyAppleToken(identityToken: string): Promise<AppleTokenPayload> {
-    // Decode the JWT header to get the key ID
     const parts = identityToken.split('.');
     if (parts.length !== 3) {
       throw new UnauthorizedException('Invalid Apple token format');
@@ -186,18 +153,14 @@ export class AuthService {
     }
 
     const kid = header.kid;
-
     if (!kid) {
       throw new UnauthorizedException('Invalid Apple token: missing key ID');
     }
 
-    // Fetch Apple's public keys
     let keys: { kid: string; n: string; e: string }[];
     try {
       const response = await fetch('https://appleid.apple.com/auth/keys');
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       keys = data.keys;
     } catch {
@@ -205,15 +168,12 @@ export class AuthService {
     }
 
     const key = keys.find((k) => k.kid === kid);
-
     if (!key) {
       throw new UnauthorizedException('Invalid Apple token: key not found');
     }
 
-    // Convert the JWK to PEM format
     const publicKey = this.jwkToPem(key);
 
-    // Verify the token payload
     let payload: AppleTokenPayload;
     try {
       payload = JSON.parse(Buffer.from(parts[1], 'base64').toString()) as AppleTokenPayload;
@@ -221,7 +181,6 @@ export class AuthService {
       throw new UnauthorizedException('Invalid Apple token: unable to decode payload');
     }
 
-    // Verify signature
     const signatureValid = crypto.verify(
       'RSA-SHA256',
       Buffer.from(`${parts[0]}.${parts[1]}`),
@@ -233,18 +192,15 @@ export class AuthService {
       throw new UnauthorizedException('Invalid Apple token: signature verification failed');
     }
 
-    // Verify claims
     const now = Math.floor(Date.now() / 1000);
     const appleClientId = this.configService.get<string>('APPLE_CLIENT_ID');
 
     if (payload.iss !== 'https://appleid.apple.com') {
       throw new UnauthorizedException('Invalid Apple token: invalid issuer');
     }
-
     if (payload.aud !== appleClientId) {
       throw new UnauthorizedException('Invalid Apple token: invalid audience');
     }
-
     if (payload.exp < now) {
       throw new UnauthorizedException('Invalid Apple token: token expired');
     }
@@ -253,29 +209,25 @@ export class AuthService {
   }
 
   private jwkToPem(jwk: { n: string; e: string }): string {
-    // Convert the JWK RSA public key to PEM format
     const n = Buffer.from(jwk.n, 'base64url');
     const e = Buffer.from(jwk.e, 'base64url');
 
-    // DER encode the RSA public key
     const nLen = n.length;
     const eLen = e.length;
 
-    // ASN.1 sequence for RSA public key
     const rsaPublicKey = Buffer.concat([
-      Buffer.from([0x30]), // SEQUENCE
+      Buffer.from([0x30]),
       this.encodeLength(nLen + eLen + 4 + (n[0] & 0x80 ? 1 : 0) + (e[0] & 0x80 ? 1 : 0)),
-      Buffer.from([0x02]), // INTEGER (n)
+      Buffer.from([0x02]),
       this.encodeLength(nLen + (n[0] & 0x80 ? 1 : 0)),
       n[0] & 0x80 ? Buffer.from([0x00]) : Buffer.alloc(0),
       n,
-      Buffer.from([0x02]), // INTEGER (e)
+      Buffer.from([0x02]),
       this.encodeLength(eLen + (e[0] & 0x80 ? 1 : 0)),
       e[0] & 0x80 ? Buffer.from([0x00]) : Buffer.alloc(0),
       e,
     ]);
 
-    // Wrap in SubjectPublicKeyInfo structure
     const algorithmIdentifier = Buffer.from([
       0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
       0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
@@ -295,7 +247,6 @@ export class AuthService {
       bitString,
     ]);
 
-    // Convert to PEM format
     const base64 = spki.toString('base64');
     const lines = base64.match(/.{1,64}/g) || [];
     return `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----`;

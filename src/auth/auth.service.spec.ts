@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { MealsService } from '../meals/meals.service';
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
@@ -13,7 +14,10 @@ describe('AuthService', () => {
 
   const mockPrisma = {
     user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-    streak: { create: jest.fn() },
+  };
+
+  const mockMealsService = {
+    seedDefaultMeals: jest.fn().mockResolvedValue(undefined),
   };
 
   const mockJwtService = {
@@ -29,6 +33,7 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: MealsService, useValue: mockMealsService },
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
       ],
@@ -51,7 +56,7 @@ describe('AuthService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    it('should create user, create streak record, and return token', async () => {
+    it('should create user, seed default meals, and return token', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
       mockPrisma.user.create.mockResolvedValue({
@@ -59,7 +64,7 @@ describe('AuthService', () => {
         email: 'john@example.com',
         name: 'John',
       });
-      mockPrisma.streak.create.mockResolvedValue({});
+      mockMealsService.seedDefaultMeals.mockResolvedValue(undefined);
 
       const result = await service.register({
         name: 'John',
@@ -69,9 +74,7 @@ describe('AuthService', () => {
 
       expect(result.access_token).toBe('mock-token');
       expect(result.user.email).toBe('john@example.com');
-      expect(mockPrisma.streak.create).toHaveBeenCalledWith({
-        data: { user_id: 'user-1' },
-      });
+      expect(mockMealsService.seedDefaultMeals).toHaveBeenCalledWith('user-1');
     });
   });
 
@@ -87,7 +90,7 @@ describe('AuthService', () => {
     it('should throw UnauthorizedException if password invalid', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
-        password_hash: 'hash',
+        passwordHash: 'hash',
       });
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
@@ -101,7 +104,7 @@ describe('AuthService', () => {
         id: 'user-1',
         email: 'john@example.com',
         name: 'John',
-        password_hash: 'hash',
+        passwordHash: 'hash',
       });
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
@@ -119,8 +122,8 @@ describe('AuthService', () => {
         id: 'user-1',
         email: 'john@example.com',
         name: 'John',
-        password_hash: null,
-        google_id: 'google-123',
+        passwordHash: null,
+        googleId: 'google-123',
       });
 
       await expect(
@@ -135,28 +138,25 @@ describe('AuthService', () => {
         getPayload: () => ({
           sub: 'google-123',
           email: 'john@example.com',
-          name: 'Google Name', // Google returns a different name
+          name: 'Google Name',
         }),
       };
       jest
         .spyOn(service['googleClient'], 'verifyIdToken')
         .mockResolvedValue(mockTicket as never);
 
-      // User has edited their name in the app to "Custom Name"
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
         email: 'john@example.com',
         name: 'Custom Name',
-        google_id: 'google-123',
+        googleId: 'google-123',
       });
 
       const result = await service.googleLogin({ idToken: 'valid-google-token' });
 
       expect(result.access_token).toBe('mock-token');
       expect(result.user.email).toBe('john@example.com');
-      // Name should be preserved from DB, not overwritten by Google's name
       expect(result.user.name).toBe('Custom Name');
-      // user.update should NOT be called for existing users
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
@@ -165,17 +165,15 @@ describe('AuthService', () => {
         getPayload: () => ({
           sub: 'google-123',
           email: 'john@example.com',
-          name: 'Google Name', // Google returns a different name
+          name: 'Google Name',
         }),
       };
       jest
         .spyOn(service['googleClient'], 'verifyIdToken')
         .mockResolvedValue(mockTicket as never);
 
-      // First call: no user with Google ID
-      // Second call: user exists with email (user has custom name)
       mockPrisma.user.findUnique
-        .mockResolvedValueOnce(null) // google_id search
+        .mockResolvedValueOnce(null) // googleId search
         .mockResolvedValueOnce({
           id: 'user-1',
           email: 'john@example.com',
@@ -186,22 +184,20 @@ describe('AuthService', () => {
         id: 'user-1',
         email: 'john@example.com',
         name: 'Custom Name',
-        google_id: 'google-123',
+        googleId: 'google-123',
       });
 
       const result = await service.googleLogin({ idToken: 'valid-google-token' });
 
-      // Should only update google_id, NOT name
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        data: { google_id: 'google-123' },
+        data: { googleId: 'google-123' },
       });
-      // Name should be preserved
       expect(result.user.name).toBe('Custom Name');
       expect(result.access_token).toBe('mock-token');
     });
 
-    it('should create new user for Google sign-in with new email', async () => {
+    it('should create new user for Google sign-in with new email and seed meals', async () => {
       const mockTicket = {
         getPayload: () => ({
           sub: 'google-123',
@@ -213,18 +209,17 @@ describe('AuthService', () => {
         .spyOn(service['googleClient'], 'verifyIdToken')
         .mockResolvedValue(mockTicket as never);
 
-      // No existing users
       mockPrisma.user.findUnique
-        .mockResolvedValueOnce(null) // google_id search
+        .mockResolvedValueOnce(null) // googleId search
         .mockResolvedValueOnce(null); // email search
 
       mockPrisma.user.create.mockResolvedValue({
         id: 'new-user-1',
         email: 'newuser@example.com',
         name: 'New User',
-        google_id: 'google-123',
+        googleId: 'google-123',
       });
-      mockPrisma.streak.create.mockResolvedValue({});
+      mockMealsService.seedDefaultMeals.mockResolvedValue(undefined);
 
       const result = await service.googleLogin({ idToken: 'valid-google-token' });
 
@@ -232,12 +227,10 @@ describe('AuthService', () => {
         data: {
           email: 'newuser@example.com',
           name: 'New User',
-          google_id: 'google-123',
+          googleId: 'google-123',
         },
       });
-      expect(mockPrisma.streak.create).toHaveBeenCalledWith({
-        data: { user_id: 'new-user-1' },
-      });
+      expect(mockMealsService.seedDefaultMeals).toHaveBeenCalledWith('new-user-1');
       expect(result.access_token).toBe('mock-token');
     });
 
