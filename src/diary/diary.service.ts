@@ -3,10 +3,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
 import { CreateDiaryEntryDto } from './dto/create-diary-entry.dto';
 import { EnergyUnit } from '../units/units.types';
+import { EntryQuality } from './diary.types';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-
-type EntryQuality = 'good' | 'fair' | 'poor';
 
 /**
  * Classifies a diary entry based on macronutrient caloric distribution.
@@ -29,9 +28,9 @@ function classifyEntry(
   const proteinPct = (proteinG * 4 / macroCals) * 100;
   const fatPct     = (fatG * 9     / macroCals) * 100;
 
-  if (proteinPct < 15 || fatPct > 45) return 'poor';
-  if (proteinPct >= 25 && fatPct <= 35) return 'good';
-  return 'fair';
+  if (proteinPct < 15 || fatPct > 45) return EntryQuality.Poor;
+  if (proteinPct >= 25 && fatPct <= 35) return EntryQuality.Good;
+  return EntryQuality.Fair;
 }
 
 function formatTime(date: Date): string {
