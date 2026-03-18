@@ -1,5 +1,5 @@
 export enum EntryQuality {
-  Good = 'good',
-  Fair = 'fair',
-  Poor = 'poor',
+  Good = 'GOOD',
+  Fair = 'FAIR',
+  Poor = 'POOR',
 }

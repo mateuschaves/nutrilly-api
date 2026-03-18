@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { DiaryService } from './diary.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
+import { EntryQuality } from './diary.types';
 
 describe('DiaryService', () => {
   let service: DiaryService;
@@ -65,7 +66,7 @@ describe('DiaryService', () => {
       expect(result).toHaveLength(1);
       expect(result[0].mealId).toBe('meal-1');
       expect(result[0].entries).toHaveLength(1);
-      expect(result[0].entries[0].quality).toBe('good');
+      expect(result[0].entries[0].quality).toBe(EntryQuality.Good);
     });
 
     it('should return meals with empty entries when no diary entries exist', async () => {
@@ -111,28 +112,28 @@ describe('DiaryService', () => {
       // protein 30g=120kcal(44%), carbs 30g=120kcal(44%), fat 3g=27kcal(10%)
       mockPrisma.diaryEntry.findMany.mockResolvedValue([makeEntry(267, 30, 30, 3)]);
       const result = await service.getByDate('user-1', '2025-03-15');
-      expect(result[0].entries[0].quality).toBe('good');
+      expect(result[0].entries[0].quality).toBe(EntryQuality.Good);
     });
 
     it('should return poor when protein < 15%', async () => {
       // protein 3g=12kcal(7%), carbs 50g=200kcal, fat 10g=90kcal
       mockPrisma.diaryEntry.findMany.mockResolvedValue([makeEntry(302, 3, 50, 10)]);
       const result = await service.getByDate('user-1', '2025-03-15');
-      expect(result[0].entries[0].quality).toBe('poor');
+      expect(result[0].entries[0].quality).toBe(EntryQuality.Poor);
     });
 
     it('should return poor when fat > 45%', async () => {
       // protein 5g=20kcal, carbs 5g=20kcal, fat 20g=180kcal(82%)
       mockPrisma.diaryEntry.findMany.mockResolvedValue([makeEntry(220, 5, 5, 20)]);
       const result = await service.getByDate('user-1', '2025-03-15');
-      expect(result[0].entries[0].quality).toBe('poor');
+      expect(result[0].entries[0].quality).toBe(EntryQuality.Poor);
     });
 
     it('should return fair for mid-range entry', async () => {
       // protein 18g=72kcal(20%), carbs 40g=160kcal, fat 10g=90kcal(28%)
       mockPrisma.diaryEntry.findMany.mockResolvedValue([makeEntry(322, 18, 40, 10)]);
       const result = await service.getByDate('user-1', '2025-03-15');
-      expect(result[0].entries[0].quality).toBe('fair');
+      expect(result[0].entries[0].quality).toBe(EntryQuality.Fair);
     });
   });
 
