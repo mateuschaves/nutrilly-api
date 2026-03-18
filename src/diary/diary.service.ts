@@ -6,6 +6,34 @@ import { EnergyUnit } from '../units/units.types';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
+type EntryQuality = 'good' | 'fair' | 'poor';
+
+/**
+ * Classifies a diary entry based on macronutrient caloric distribution.
+ *
+ * Thresholds (% of macronutrient calories):
+ *   good  — protein ≥ 25% AND fat ≤ 35%
+ *   poor  — protein < 15% OR fat > 45%
+ *   fair  — everything in between
+ *   null  — entry has no calories (unclassifiable)
+ */
+function classifyEntry(
+  kcal: number,
+  proteinG: number,
+  carbsG: number,
+  fatG: number,
+): EntryQuality | null {
+  const macroCals = proteinG * 4 + carbsG * 4 + fatG * 9;
+  if (kcal === 0 || macroCals === 0) return null;
+
+  const proteinPct = (proteinG * 4 / macroCals) * 100;
+  const fatPct     = (fatG * 9     / macroCals) * 100;
+
+  if (proteinPct < 15 || fatPct > 45) return 'poor';
+  if (proteinPct >= 25 && fatPct <= 35) return 'good';
+  return 'fair';
+}
+
 function formatTime(date: Date): string {
   const h = date.getHours() % 12 || 12;
   const m = date.getMinutes().toString().padStart(2, '0');
@@ -57,6 +85,7 @@ export class DiaryService {
           portion: e.portion,
           time: formatTime(e.loggedAt),
           photoUri: e.photoUri,
+          quality: classifyEntry(e.kcal, e.proteinG, e.carbsG, e.fatG),
         })),
       };
     });
@@ -100,6 +129,7 @@ export class DiaryService {
       portion: entry.portion,
       time: formatTime(entry.loggedAt),
       photoUri: entry.photoUri,
+      quality: classifyEntry(entry.kcal, entry.proteinG, entry.carbsG, entry.fatG),
     };
   }
 
