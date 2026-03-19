@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { HydrationService } from './hydration.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
+import { AchievementsService } from '../achievements/achievements.service';
 
 describe('HydrationService', () => {
   let service: HydrationService;
@@ -22,12 +23,17 @@ describe('HydrationService', () => {
     convertWater: jest.fn().mockImplementation((ml: number) => Math.round((ml / 1000) * 100) / 100),
   };
 
+  const mockAchievementsService = {
+    evaluateForHydration: jest.fn().mockResolvedValue([]),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         HydrationService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: UnitsService, useValue: mockUnitsService },
+        { provide: AchievementsService, useValue: mockAchievementsService },
       ],
     }).compile();
 
@@ -111,7 +117,7 @@ describe('HydrationService', () => {
 
       const result = await service.addEntry('user-1', '2026-03-15', { amountMl: 350 });
 
-      expect(result).toEqual(created);
+      expect(result).toEqual({ ...created, newAchievements: [] });
       expect(mockPrisma.hydrationEntry.create).toHaveBeenCalledWith({
         data: { userId: 'user-1', date: '2026-03-15', amountMl: 350 },
         select: { id: true, amountMl: true, loggedAt: true },
