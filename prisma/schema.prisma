@@ -3,12 +3,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id               String               @id @default(cuid())
+  id               String               @id @default(auto()) @map("_id") @db.ObjectId
   email            String               @unique
   name             String
   passwordHash     String?
@@ -28,19 +28,19 @@ model User {
 }
 
 model UserUnitPreferences {
-  userId String @id
+  userId String @id @map("_id") @db.ObjectId
   energy String @default("kcal") // "kcal" | "kj"
   water  String @default("l")    // "l" | "fl_oz"
   weight String @default("kg")   // "kg" | "lbs"
   height String @default("cm")   // "cm" | "ft_in"
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
 
   @@map("user_unit_preferences")
 }
 
 model UserProfile {
-  userId        String  @id
+  userId        String  @id @map("_id") @db.ObjectId
   birthdate     String? // YYYY-MM-DD
   sex           String? // "male" | "female"
   weightKg      Float?
@@ -53,29 +53,29 @@ model UserProfile {
   fatGoalG      Float   @default(70)
   waterGoalMl   Int     @default(2600) // always ml internally
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
 
   @@map("user_profiles")
 }
 
 model Meal {
-  id           String       @id @default(cuid())
-  userId       String
+  id           String       @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String       @db.ObjectId
   name         String
   icon         String
   sortOrder    Int          @default(0)
   diaryEntries DiaryEntry[]
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@map("meals")
 }
 
 model DiaryEntry {
-  id       String   @id @default(cuid())
-  userId   String
-  mealId   String
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId   String   @db.ObjectId
+  mealId   String   @db.ObjectId
   date     String   // YYYY-MM-DD
   name     String
   kcal     Int
@@ -86,45 +86,46 @@ model DiaryEntry {
   photoUri String?
   loggedAt DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  meal Meal @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+  meal Meal @relation(fields: [mealId], references: [id])
 
   @@index([userId, date])
   @@map("diary_entries")
 }
 
 model HydrationEntry {
-  id       String   @id @default(cuid())
-  userId   String
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId   String   @db.ObjectId
   date     String   // YYYY-MM-DD
   amountMl Int
   loggedAt DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
 
   @@index([userId, date])
   @@map("hydration_entries")
 }
 
 model WeightLog {
-  id       String   @id @default(cuid())
-  userId   String
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId   String   @db.ObjectId
   weightKg Float
   source   String   // WeightSource enum: "APPLE_HEALTH" | "SAMSUNG_HEALTH" | "GOOGLE_FIT" | "MANUAL"
   loggedAt DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
 
   @@index([userId, loggedAt])
   @@map("weight_logs")
 }
+
 model UserAchievement {
-  id             String   @id @default(cuid())
-  userId         String
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @db.ObjectId
   achievementKey String
   earnedAt       DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
 
   @@unique([userId, achievementKey])
   @@map("user_achievements")
