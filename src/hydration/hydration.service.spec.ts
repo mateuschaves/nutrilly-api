@@ -241,13 +241,13 @@ describe('HydrationService', () => {
       await expect(service.addEntry(USER_ID, DATE, dto)).rejects.toThrow('achievements failed');
     });
 
-    it('should return the created entry directly from Prisma', async () => {
+    it('should return the created entry fields plus newAchievements', async () => {
       const created = makeEntry({ id: 'new-entry', amountMl: 750 });
       mockPrisma.hydrationEntry.create.mockResolvedValue(created);
 
       const result = await service.addEntry(USER_ID, DATE, { amountMl: 750 });
 
-      expect(result).toEqual(created);
+      expect(result).toMatchObject({ id: 'new-entry', amountMl: 750, newAchievements: [] });
     });
 
     it('should return entry with id, amountMl and loggedAt', async () => {
