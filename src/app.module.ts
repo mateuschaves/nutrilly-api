@@ -9,6 +9,8 @@ import { DiaryModule } from './diary/diary.module';
 import { HydrationModule } from './hydration/hydration.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { WeightModule } from './weight/weight.module';
+import { R2Module } from './r2/r2.module';
+import { AchievementsModule } from './achievements/achievements.module';
 
 @Module({
   imports: [
@@ -18,10 +20,12 @@ import { WeightModule } from './weight/weight.module';
     UnitsModule,
     ProfileModule,
     MealsModule,
+    AchievementsModule,
     DiaryModule,
     HydrationModule,
     DashboardModule,
     WeightModule,
+    R2Module,
   ],
 })
 export class AppModule {}

@@ -241,6 +241,222 @@ describe('AuthService', () => {
         service.googleLogin({ idToken: 'invalid-token' }),
       ).rejects.toThrow();
     });
+
+    it('should throw UnauthorizedException when Google payload is null', async () => {
+      const mockTicket = { getPayload: () => null };
+      jest.spyOn(service['googleClient'], 'verifyIdToken').mockResolvedValue(mockTicket as never);
+
+      await expect(service.googleLogin({ idToken: 'token' })).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException when Google account has no email', async () => {
+      const mockTicket = { getPayload: () => ({ sub: 'google-123', email: undefined, name: 'No Email' }) };
+      jest.spyOn(service['googleClient'], 'verifyIdToken').mockResolvedValue(mockTicket as never);
+
+      await expect(service.googleLogin({ idToken: 'token' })).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should use "Google User" as name when Google token has no name', async () => {
+      const mockTicket = { getPayload: () => ({ sub: 'google-new', email: 'noname@example.com', name: undefined }) };
+      jest.spyOn(service['googleClient'], 'verifyIdToken').mockResolvedValue(mockTicket as never);
+
+      mockPrisma.user.findUnique.mockResolvedValue(null).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'new-user-2',
+        email: 'noname@example.com',
+        name: 'Google User',
+      });
+
+      const result = await service.googleLogin({ idToken: 'token' });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ name: 'Google User' }) }),
+      );
+      expect(result.access_token).toBe('mock-token');
+    });
+  });
+
+  // ─── appleLogin ──────────────────────────────────────────────────────────────
+
+  describe('appleLogin', () => {
+    const makeApplePayload = (overrides = {}) => ({
+      iss: 'https://appleid.apple.com',
+      aud: 'mock-config-value',
+      sub: 'apple-123',
+      email: 'apple@example.com',
+      email_verified: 'true',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      iat: Math.floor(Date.now() / 1000),
+      auth_time: Math.floor(Date.now() / 1000),
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      jest.spyOn(service as any, 'verifyAppleToken').mockResolvedValue(makeApplePayload());
+    });
+
+    it('should return token for existing user with Apple ID', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'apple@example.com',
+        name: 'Apple User',
+        appleId: 'apple-123',
+      });
+
+      const result = await service.appleLogin({ identityToken: 'valid-apple-token' });
+
+      expect(result.access_token).toBe('mock-token');
+      expect(result.user.email).toBe('apple@example.com');
+    });
+
+    it('should link Apple account to existing user with same email', async () => {
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null) // appleId search
+        .mockResolvedValueOnce({ id: 'user-1', email: 'apple@example.com', name: 'Existing User' }); // email search
+      mockPrisma.user.update.mockResolvedValue({
+        id: 'user-1',
+        email: 'apple@example.com',
+        name: 'Existing User',
+        appleId: 'apple-123',
+      });
+
+      const result = await service.appleLogin({ identityToken: 'valid-apple-token' });
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { appleId: 'apple-123' },
+      });
+      expect(result.user.name).toBe('Existing User');
+    });
+
+    it('should create new user for Apple sign-in with new email and seed meals', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'new-user-3',
+        email: 'apple@example.com',
+        name: 'John Apple',
+        appleId: 'apple-123',
+      });
+
+      const result = await service.appleLogin({
+        identityToken: 'valid-apple-token',
+        fullName: 'John Apple',
+      });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ name: 'John Apple', appleId: 'apple-123' }) }),
+      );
+      expect(mockMealsService.seedDefaultMeals).toHaveBeenCalledWith('new-user-3');
+      expect(result.access_token).toBe('mock-token');
+    });
+
+    it('should use "Apple User" as name when fullName is not provided', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'new-user-4',
+        email: 'apple@example.com',
+        name: 'Apple User',
+      });
+
+      await service.appleLogin({ identityToken: 'valid-apple-token' });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ name: 'Apple User' }) }),
+      );
+    });
+
+    it('should throw UnauthorizedException when Apple account has no email', async () => {
+      jest.spyOn(service as any, 'verifyAppleToken').mockResolvedValue(makeApplePayload({ email: undefined }));
+
+      await expect(
+        service.appleLogin({ identityToken: 'valid-apple-token' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  // ─── verifyAppleToken (private) ──────────────────────────────────────────────
+
+  describe('verifyAppleToken (private)', () => {
+    it('should throw UnauthorizedException for token with wrong number of parts', async () => {
+      await expect(
+        service['verifyAppleToken']('only.two'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException when header cannot be decoded', async () => {
+      // '!!!' is not valid base64
+      await expect(
+        service['verifyAppleToken']('!!!.payload.signature'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException when header has no kid', async () => {
+      const header = Buffer.from(JSON.stringify({ alg: 'RS256' })).toString('base64');
+      const payload = Buffer.from(JSON.stringify({})).toString('base64');
+
+      await expect(
+        service['verifyAppleToken'](`${header}.${payload}.signature`),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException when Apple public keys fetch fails', async () => {
+      const header = Buffer.from(JSON.stringify({ kid: 'test-kid', alg: 'RS256' })).toString('base64');
+      const payload = Buffer.from(JSON.stringify({})).toString('base64');
+
+      global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+
+      await expect(
+        service['verifyAppleToken'](`${header}.${payload}.signature`),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException when matching key is not found in Apple keys', async () => {
+      const header = Buffer.from(JSON.stringify({ kid: 'unknown-kid', alg: 'RS256' })).toString('base64');
+      const payload = Buffer.from(JSON.stringify({})).toString('base64');
+
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ keys: [{ kid: 'other-kid', n: 'abc', e: 'def' }] }),
+      });
+
+      await expect(
+        service['verifyAppleToken'](`${header}.${payload}.signature`),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException when Apple keys HTTP response is not ok', async () => {
+      const header = Buffer.from(JSON.stringify({ kid: 'test-kid', alg: 'RS256' })).toString('base64');
+      const payload = Buffer.from(JSON.stringify({})).toString('base64');
+
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503 });
+
+      await expect(
+        service['verifyAppleToken'](`${header}.${payload}.signature`),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  // ─── encodeLength (private) ──────────────────────────────────────────────────
+
+  describe('encodeLength (private)', () => {
+    it('should encode short lengths (< 128) as single byte', () => {
+      const result: Buffer = service['encodeLength'](127);
+      expect(result).toEqual(Buffer.from([127]));
+    });
+
+    it('should encode lengths >= 128 with multi-byte encoding', () => {
+      const result: Buffer = service['encodeLength'](256);
+      // 0x82 = 0x80 | 2 bytes, then 0x01, 0x00
+      expect(result[0]).toBe(0x80 | 2);
+      expect(result[1]).toBe(0x01);
+      expect(result[2]).toBe(0x00);
+    });
+
+    it('should encode length 128 with long form', () => {
+      const result: Buffer = service['encodeLength'](128);
+      expect(result[0]).toBe(0x81); // 0x80 | 1
+      expect(result[1]).toBe(128);
+    });
   });
 
   describe('appleLogin', () => {

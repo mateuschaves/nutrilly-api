@@ -20,6 +20,7 @@ model User {
   diaryEntries     DiaryEntry[]
   hydrationEntries HydrationEntry[]
   weightLogs       WeightLog[]
+  achievements     UserAchievement[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 
@@ -116,4 +117,15 @@ model WeightLog {
 
   @@index([userId, loggedAt])
   @@map("weight_logs")
+}
+model UserAchievement {
+  id             String   @id @default(cuid())
+  userId         String
+  achievementKey String
+  earnedAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementKey])
+  @@map("user_achievements")
 }
