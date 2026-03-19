@@ -921,4 +921,192 @@ describe('AchievementsService', () => {
       );
     });
   });
+
+  // ─── Null / undefined Prisma return handling ────────────────────────────────
+
+  describe('null and edge-case Prisma returns', () => {
+    it('checkWaterWeek: should treat null amountMl as 0 and not grant achievement', async () => {
+      mockPrisma.hydrationEntry.groupBy.mockResolvedValue([
+        { date: '2026-03-19', _sum: { amountMl: null } },
+        { date: '2026-03-18', _sum: { amountMl: null } },
+      ]);
+      const result = await service['checkWaterWeek'](USER_ID);
+      expect(result).not.toContain('WATER_WEEK');
+    });
+
+    it('checkCalorieMaster: should treat null kcal sum as 0 and exclude it from range', async () => {
+      mockPrisma.diaryEntry.groupBy.mockResolvedValue([
+        { date: '2026-03-17', _sum: { kcal: null } }, // treated as 0 → outside ±10% of 2200
+        { date: '2026-03-18', _sum: { kcal: null } },
+        { date: '2026-03-19', _sum: { kcal: null } },
+      ]);
+      const result = await service['checkCalorieMaster'](USER_ID);
+      expect(result).not.toContain('CALORIE_MASTER');
+    });
+
+    it('checkTripleCrown: should treat null kcal/protein as 0 and not grant achievement', async () => {
+      mockPrisma.diaryEntry.groupBy.mockResolvedValue([
+        { date: '2026-03-19', _sum: { kcal: null, proteinG: null } },
+      ]);
+      mockPrisma.hydrationEntry.groupBy.mockResolvedValue([
+        { date: '2026-03-19', _sum: { amountMl: 3000 } },
+      ]);
+      const result = await service['checkTripleCrown'](USER_ID);
+      expect(result).not.toContain('TRIPLE_CROWN');
+    });
+
+    it('checkTripleCrown: should use 0 water when date has no hydration entry', async () => {
+      mockPrisma.diaryEntry.groupBy.mockResolvedValue([
+        { date: '2026-03-19', _sum: { kcal: 2200, proteinG: 150 } },
+      ]);
+      // No matching hydration entry for that date
+      mockPrisma.hydrationEntry.groupBy.mockResolvedValue([
+        { date: '2026-03-18', _sum: { amountMl: 5000 } }, // different day
+      ]);
+      const result = await service['checkTripleCrown'](USER_ID);
+      expect(result).not.toContain('TRIPLE_CROWN');
+    });
+
+    it('checkEarlyBird: should handle BigInt(0) correctly as falsy count', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
+      const result = await service['checkEarlyBird'](USER_ID);
+      expect(result).not.toContain('EARLY_BIRD');
+    });
+
+    it('checkNightOwl: should handle count exactly at threshold (BigInt(3))', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(3) }]);
+      const result = await service['checkNightOwl'](USER_ID);
+      expect(result).toContain('NIGHT_OWL');
+    });
+
+    it('checkNightOwl: should not grant when count is BigInt(2)', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(2) }]);
+      const result = await service['checkNightOwl'](USER_ID);
+      expect(result).not.toContain('NIGHT_OWL');
+    });
+
+    it('checkProteinPro: should not grant when groupBy returns empty array', async () => {
+      mockPrisma.diaryEntry.groupBy.mockResolvedValue([]);
+      const result = await service['checkProteinPro'](USER_ID);
+      expect(result).not.toContain('PROTEIN_PRO');
+    });
+
+    it('checkStreaks: should return empty array when findMany returns empty', async () => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([]);
+      const result = await service['checkStreaks'](USER_ID);
+      expect(result).toEqual([]);
+    });
+  });
+
+  // ─── evaluateAll: batch grant ────────────────────────────────────────────────
+
+  describe('evaluateAll: multiple achievements granted at once', () => {
+    it('should grant multiple achievements in a single createMany call', async () => {
+      // Setup conditions that trigger both FIRST_LOG and PERFECT_WEEK
+      mockPrisma.diaryEntry.count.mockResolvedValue(1);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue(makeDates('2026-03-19', 7));
+
+      await service.evaluateAll(USER_ID);
+
+      expect(mockPrisma.userAchievement.createMany).toHaveBeenCalledTimes(1);
+      const data = mockPrisma.userAchievement.createMany.mock.calls[0][0].data;
+      const keys = data.map((d) => d.achievementKey);
+      expect(keys).toContain('FIRST_LOG');
+      expect(keys).toContain('PERFECT_WEEK');
+    });
+
+    it('should include userId in every achievement record passed to createMany', async () => {
+      mockPrisma.diaryEntry.count.mockResolvedValue(1);
+
+      await service.evaluateAll(USER_ID);
+
+      const data = mockPrisma.userAchievement.createMany.mock.calls[0][0].data;
+      expect(data.every((d) => d.userId === USER_ID)).toBe(true);
+    });
+
+    it('should grant PERFECT_WEEK, STREAK_14 and STREAK_21 together for a 21-day streak', async () => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue(makeDates('2026-03-19', 21));
+      mockPrisma.diaryEntry.count.mockResolvedValue(21);
+
+      await service.evaluateAll(USER_ID);
+
+      const keys = mockPrisma.userAchievement.createMany.mock.calls[0][0].data
+        .map((d) => d.achievementKey);
+
+      expect(keys).toContain('FIRST_LOG');
+      expect(keys).toContain('PERFECT_WEEK');
+      expect(keys).toContain('STREAK_14');
+      expect(keys).toContain('STREAK_21');
+      expect(keys).not.toContain('MARATHON'); // 21 < 30
+    });
+  });
+
+  // ─── getAchievements: result ordering and completeness ───────────────────────
+
+  describe('getAchievements: result ordering and completeness', () => {
+    it('should return achievements in the same order as ACHIEVEMENTS constant', async () => {
+      const result = await service.getAchievements(USER_ID);
+      const resultKeys = result.map((a) => a.key);
+      const expectedKeys = ACHIEVEMENTS.map((a) => a.key);
+      expect(resultKeys).toEqual(expectedKeys);
+    });
+
+    it('should mark only the earned achievement as earned when one is persisted', async () => {
+      const earnedAt = new Date();
+      mockPrisma.userAchievement.findMany.mockResolvedValue([
+        { achievementKey: 'HYDRATION_HERO', earnedAt },
+      ]);
+
+      const result = await service.getAchievements(USER_ID);
+
+      const earnedOnes = result.filter((a) => a.earned);
+      expect(earnedOnes).toHaveLength(1);
+      expect(earnedOnes[0].key).toBe('HYDRATION_HERO');
+    });
+
+    it('should correctly reflect multiple pre-earned achievements from DB', async () => {
+      const earnedAt = new Date();
+      mockPrisma.userAchievement.findMany.mockResolvedValue([
+        { achievementKey: 'FIRST_LOG', earnedAt },
+        { achievementKey: 'PERFECT_WEEK', earnedAt },
+        { achievementKey: 'HYDRATION_HERO', earnedAt },
+      ]);
+
+      const result = await service.getAchievements(USER_ID);
+
+      const earnedKeys = result.filter((a) => a.earned).map((a) => a.key);
+      expect(earnedKeys).toContain('FIRST_LOG');
+      expect(earnedKeys).toContain('PERFECT_WEEK');
+      expect(earnedKeys).toContain('HYDRATION_HERO');
+      expect(earnedKeys).not.toContain('STREAK_14');
+    });
+
+    it('should not have any extra or missing fields in each achievement DTO', async () => {
+      const result = await service.getAchievements(USER_ID);
+
+      for (const a of result) {
+        const keys = Object.keys(a).sort();
+        expect(keys).toEqual(['category', 'description', 'earned', 'earnedAt', 'icon', 'key', 'name']);
+      }
+    });
+
+    it('should scope achievements to the correct userId (not bleed across users)', async () => {
+      const otherUserEarned = [{ achievementKey: 'MARATHON', earnedAt: new Date() }];
+
+      // First call for user-test-1 returns nothing earned
+      mockPrisma.userAchievement.findMany.mockResolvedValue([]);
+
+      const resultUser1 = await service.getAchievements(USER_ID);
+
+      // Second call for a different user
+      mockPrisma.userAchievement.findMany.mockResolvedValue(otherUserEarned);
+      const resultUser2 = await service.getAchievements('user-test-2');
+
+      const user1Marathon = resultUser1.find((a) => a.key === 'MARATHON');
+      const user2Marathon = resultUser2.find((a) => a.key === 'MARATHON');
+
+      expect(user1Marathon!.earned).toBe(false);
+      expect(user2Marathon!.earned).toBe(true);
+    });
+  });
 });
