@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ACHIEVEMENTS, AchievementDefinition } from './achievements.constants';
+import { ACHIEVEMENTS, AchievementDefinition, AchievementKey } from './achievements.constants';
 import { AchievementDto } from './dto/achievement-response.dto';
 import { computeBestStreak } from '../dashboard/streak.utils';
 
@@ -112,7 +112,7 @@ export class AchievementsService {
       this.checkWeekComplete(userId),
     ]);
 
-    const newKeys = checks.flat().filter((k): k is string => k !== null);
+    const newKeys = checks.flat().filter((k): k is AchievementKey => k !== null);
     if (newKeys.length === 0) return;
 
     await this.prisma.userAchievement.createMany({
@@ -126,10 +126,10 @@ export class AchievementsService {
   private async persistAndReturn(
     userId: string,
     alreadyEarned: { achievementKey: string }[],
-    checks: string[][],
+    checks: AchievementKey[][],
   ): Promise<AchievementDto[]> {
     const alreadyEarnedSet = new Set(alreadyEarned.map((a) => a.achievementKey));
-    const unlocked = checks.flat().filter((k): k is string => k !== null);
+    const unlocked = checks.flat().filter((k): k is AchievementKey => k !== null);
     const newKeys = unlocked.filter((k) => !alreadyEarnedSet.has(k));
 
     if (newKeys.length === 0) return [];
@@ -148,12 +148,12 @@ export class AchievementsService {
 
   // ─── Individual Checks ─────────────────────────────────────────────────────
 
-  private async checkFirstLog(userId: string): Promise<string[]> {
+  private async checkFirstLog(userId: string): Promise<AchievementKey[]> {
     const count = await this.prisma.diaryEntry.count({ where: { userId } });
-    return count >= 1 ? ['FIRST_LOG'] : [];
+    return count >= 1 ? [AchievementKey.FIRST_LOG] : [];
   }
 
-  private async checkStreaks(userId: string): Promise<string[]> {
+  private async checkStreaks(userId: string): Promise<AchievementKey[]> {
     const rows = await this.prisma.diaryEntry.findMany({
       where: { userId },
       select: { date: true },
@@ -164,15 +164,15 @@ export class AchievementsService {
     const dates = rows.map((r) => r.date);
     const best = computeBestStreak(dates);
 
-    const keys: string[] = [];
-    if (best >= 7) keys.push('PERFECT_WEEK');
-    if (best >= 14) keys.push('STREAK_14');
-    if (best >= 21) keys.push('STREAK_21');
-    if (best >= 30) keys.push('MARATHON');
+    const keys: AchievementKey[] = [];
+    if (best >= 7) keys.push(AchievementKey.PERFECT_WEEK);
+    if (best >= 14) keys.push(AchievementKey.STREAK_14);
+    if (best >= 21) keys.push(AchievementKey.STREAK_21);
+    if (best >= 30) keys.push(AchievementKey.MARATHON);
     return keys;
   }
 
-  private async checkHydrationHero(userId: string): Promise<string[]> {
+  private async checkHydrationHero(userId: string): Promise<AchievementKey[]> {
     const profile = await this.prisma.userProfile.findUnique({
       where: { userId },
       select: { waterGoalMl: true },
@@ -186,10 +186,10 @@ export class AchievementsService {
       having: { amountMl: { _sum: { gte: goalMl } } },
     });
 
-    return groups.length >= 1 ? ['HYDRATION_HERO'] : [];
+    return groups.length >= 1 ? [AchievementKey.HYDRATION_HERO] : [];
   }
 
-  private async checkWaterWeek(userId: string): Promise<string[]> {
+  private async checkWaterWeek(userId: string): Promise<AchievementKey[]> {
     const [profile, groups] = await Promise.all([
       this.prisma.userProfile.findUnique({
         where: { userId },
@@ -216,7 +216,7 @@ export class AchievementsService {
       const curr = new Date(qualifyingDates[i]).getTime();
       if (Math.round((curr - prev) / 86_400_000) === 1) {
         streak++;
-        if (streak >= 7) return ['WATER_WEEK'];
+        if (streak >= 7) return [AchievementKey.WATER_WEEK];
       } else {
         streak = 1;
       }
@@ -224,7 +224,7 @@ export class AchievementsService {
     return [];
   }
 
-  private async checkProteinPro(userId: string): Promise<string[]> {
+  private async checkProteinPro(userId: string): Promise<AchievementKey[]> {
     const profile = await this.prisma.userProfile.findUnique({
       where: { userId },
       select: { proteinGoalG: true },
@@ -238,10 +238,10 @@ export class AchievementsService {
       having: { proteinG: { _sum: { gte: goalG } } },
     });
 
-    return groups.length >= 1 ? ['PROTEIN_PRO'] : [];
+    return groups.length >= 1 ? [AchievementKey.PROTEIN_PRO] : [];
   }
 
-  private async checkCalorieMaster(userId: string): Promise<string[]> {
+  private async checkCalorieMaster(userId: string): Promise<AchievementKey[]> {
     const profile = await this.prisma.userProfile.findUnique({
       where: { userId },
       select: { caloriesGoal: true },
@@ -259,10 +259,10 @@ export class AchievementsService {
       return Math.abs(kcal - goal) / goal <= 0.1;
     });
 
-    return qualifying.length >= 3 ? ['CALORIE_MASTER'] : [];
+    return qualifying.length >= 3 ? [AchievementKey.CALORIE_MASTER] : [];
   }
 
-  private async checkTripleCrown(userId: string): Promise<string[]> {
+  private async checkTripleCrown(userId: string): Promise<AchievementKey[]> {
     const profile = await this.prisma.userProfile.findUnique({ where: { userId } });
     if (!profile) return [];
 
@@ -292,12 +292,12 @@ export class AchievementsService {
       const proteinMet = protein >= profile.proteinGoalG;
       const waterMet = water >= profile.waterGoalMl;
 
-      if (calorieMet && proteinMet && waterMet) return ['TRIPLE_CROWN'];
+      if (calorieMet && proteinMet && waterMet) return [AchievementKey.TRIPLE_CROWN];
     }
     return [];
   }
 
-  private async checkQualityStreak(userId: string): Promise<string[]> {
+  private async checkQualityStreak(userId: string): Promise<AchievementKey[]> {
     const entries = await this.prisma.diaryEntry.findMany({
       where: { userId },
       select: { date: true, kcal: true, proteinG: true, carbsG: true, fatG: true },
@@ -310,42 +310,42 @@ export class AchievementsService {
       }
     }
 
-    return [...goodByDate.values()].some((count) => count >= 5) ? ['QUALITY_STREAK'] : [];
+    return [...goodByDate.values()].some((count) => count >= 5) ? [AchievementKey.QUALITY_STREAK] : [];
   }
 
-  private async checkEarlyBird(userId: string): Promise<string[]> {
+  private async checkEarlyBird(userId: string): Promise<AchievementKey[]> {
     const result = await this.prisma.$queryRaw<{ count: bigint }[]>`
       SELECT COUNT(*) as count
       FROM diary_entries
       WHERE "userId" = ${userId}
         AND EXTRACT(HOUR FROM "loggedAt" AT TIME ZONE 'UTC') < 8
     `;
-    return Number(result[0].count) > 0 ? ['EARLY_BIRD'] : [];
+    return Number(result[0].count) > 0 ? [AchievementKey.EARLY_BIRD] : [];
   }
 
-  private async checkPhotoFoodie(userId: string): Promise<string[]> {
+  private async checkPhotoFoodie(userId: string): Promise<AchievementKey[]> {
     const count = await this.prisma.diaryEntry.count({
       where: { userId, photoUri: { not: null } },
     });
-    return count >= 5 ? ['PHOTO_FOODIE'] : [];
+    return count >= 5 ? [AchievementKey.PHOTO_FOODIE] : [];
   }
 
-  private async checkNightOwl(userId: string): Promise<string[]> {
+  private async checkNightOwl(userId: string): Promise<AchievementKey[]> {
     const result = await this.prisma.$queryRaw<{ count: bigint }[]>`
       SELECT COUNT(*) as count
       FROM diary_entries
       WHERE "userId" = ${userId}
         AND EXTRACT(HOUR FROM "loggedAt" AT TIME ZONE 'UTC') >= 21
     `;
-    return Number(result[0].count) >= 3 ? ['NIGHT_OWL'] : [];
+    return Number(result[0].count) >= 3 ? [AchievementKey.NIGHT_OWL] : [];
   }
 
-  private async checkCenturion(userId: string): Promise<string[]> {
+  private async checkCenturion(userId: string): Promise<AchievementKey[]> {
     const count = await this.prisma.diaryEntry.count({ where: { userId } });
-    return count >= 100 ? ['CENTURION'] : [];
+    return count >= 100 ? [AchievementKey.CENTURION] : [];
   }
 
-  private async checkWeekComplete(userId: string): Promise<string[]> {
+  private async checkWeekComplete(userId: string): Promise<AchievementKey[]> {
     const rows = await this.prisma.diaryEntry.findMany({
       where: { userId },
       select: { date: true },
@@ -370,7 +370,7 @@ export class AchievementsService {
           break;
         }
       }
-      if (complete) return ['WEEK_COMPLETE'];
+      if (complete) return [AchievementKey.WEEK_COMPLETE];
     }
     return [];
   }
