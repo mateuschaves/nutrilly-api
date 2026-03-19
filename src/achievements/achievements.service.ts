@@ -96,28 +96,34 @@ export class AchievementsService {
 
   /** Full evaluation used by GET /achievements (returns void — caller fetches all). */
   async evaluateAll(userId: string): Promise<void> {
-    const checks = await Promise.all([
-      this.checkFirstLog(userId),
-      this.checkStreaks(userId),
-      this.checkHydrationHero(userId),
-      this.checkWaterWeek(userId),
-      this.checkProteinPro(userId),
-      this.checkCalorieMaster(userId),
-      this.checkTripleCrown(userId),
-      this.checkQualityStreak(userId),
-      this.checkEarlyBird(userId),
-      this.checkPhotoFoodie(userId),
-      this.checkNightOwl(userId),
-      this.checkCenturion(userId),
-      this.checkWeekComplete(userId),
+    const [alreadyEarned, checks] = await Promise.all([
+      this.prisma.userAchievement.findMany({
+        where: { userId },
+        select: { achievementKey: true },
+      }),
+      Promise.all([
+        this.checkFirstLog(userId),
+        this.checkStreaks(userId),
+        this.checkHydrationHero(userId),
+        this.checkWaterWeek(userId),
+        this.checkProteinPro(userId),
+        this.checkCalorieMaster(userId),
+        this.checkTripleCrown(userId),
+        this.checkQualityStreak(userId),
+        this.checkEarlyBird(userId),
+        this.checkPhotoFoodie(userId),
+        this.checkNightOwl(userId),
+        this.checkCenturion(userId),
+        this.checkWeekComplete(userId),
+      ]),
     ]);
 
-    const newKeys = checks.flat().filter((k): k is AchievementKey => k !== null);
+    const alreadyEarnedSet = new Set(alreadyEarned.map((a) => a.achievementKey));
+    const newKeys = checks.flat().filter((k): k is AchievementKey => k !== null && !alreadyEarnedSet.has(k));
     if (newKeys.length === 0) return;
 
     await this.prisma.userAchievement.createMany({
       data: newKeys.map((key) => ({ userId, achievementKey: key })),
-      skipDuplicates: true,
     });
   }
 
@@ -138,7 +144,6 @@ export class AchievementsService {
 
     await this.prisma.userAchievement.createMany({
       data: newKeys.map((key) => ({ userId, achievementKey: key })),
-      skipDuplicates: true,
     });
 
     return ACHIEVEMENTS
@@ -314,13 +319,12 @@ export class AchievementsService {
   }
 
   private async checkEarlyBird(userId: string): Promise<AchievementKey[]> {
-    const result = await this.prisma.$queryRaw<{ count: bigint }[]>`
-      SELECT COUNT(*) as count
-      FROM diary_entries
-      WHERE "userId" = ${userId}
-        AND EXTRACT(HOUR FROM "loggedAt" AT TIME ZONE 'UTC') < 8
-    `;
-    return Number(result[0].count) > 0 ? [AchievementKey.EARLY_BIRD] : [];
+    const entries = await this.prisma.diaryEntry.findMany({
+      where: { userId },
+      select: { loggedAt: true },
+    });
+    const hasEarly = entries.some((e) => e.loggedAt.getUTCHours() < 8);
+    return hasEarly ? [AchievementKey.EARLY_BIRD] : [];
   }
 
   private async checkPhotoFoodie(userId: string): Promise<AchievementKey[]> {
@@ -331,13 +335,12 @@ export class AchievementsService {
   }
 
   private async checkNightOwl(userId: string): Promise<AchievementKey[]> {
-    const result = await this.prisma.$queryRaw<{ count: bigint }[]>`
-      SELECT COUNT(*) as count
-      FROM diary_entries
-      WHERE "userId" = ${userId}
-        AND EXTRACT(HOUR FROM "loggedAt" AT TIME ZONE 'UTC') >= 21
-    `;
-    return Number(result[0].count) >= 3 ? [AchievementKey.NIGHT_OWL] : [];
+    const entries = await this.prisma.diaryEntry.findMany({
+      where: { userId },
+      select: { loggedAt: true },
+    });
+    const count = entries.filter((e) => e.loggedAt.getUTCHours() >= 21).length;
+    return count >= 3 ? [AchievementKey.NIGHT_OWL] : [];
   }
 
   private async checkCenturion(userId: string): Promise<AchievementKey[]> {

@@ -20,8 +20,8 @@ export class ProfileController {
     type: ProfileScreenResponseDto,
     description:
       'Returns all data needed to populate the profile screen: user info, body stats, ' +
-      'weight progress chart, and today's daily goal progress. ' +
-      'All values are converted to the user's preferred units.',
+      "weight progress chart, and today's daily goal progress. " +
+      "All values are converted to the user's preferred units.",
   })
   getProfile(@CurrentUser() user: CurrentUserPayload) {
     return this.profileService.getProfileScreen(user.id);
