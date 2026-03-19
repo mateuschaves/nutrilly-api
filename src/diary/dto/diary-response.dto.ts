@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { EntryQuality } from '../diary.types';
+import { AchievementDto } from '../../achievements/dto/achievement-response.dto';
 
 export class DiaryEntryResponseDto {
   @ApiProperty({ example: 'clx1y2z3a0000abc123def456' })
@@ -44,6 +45,14 @@ export class DiaryEntryResponseDto {
     example: EntryQuality.Good,
   })
   quality: EntryQuality | null;
+}
+
+export class AddDiaryEntryResponseDto extends DiaryEntryResponseDto {
+  @ApiProperty({
+    type: [AchievementDto],
+    description: 'Achievements unlocked by this diary entry. Empty array if none were unlocked.',
+  })
+  newAchievements: AchievementDto[];
 }
 
 export class MealSectionResponseDto {

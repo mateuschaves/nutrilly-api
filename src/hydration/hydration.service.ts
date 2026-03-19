@@ -48,9 +48,9 @@ export class HydrationService {
       select: { id: true, amountMl: true, loggedAt: true },
     });
 
-    await this.achievements.evaluateForHydration(userId);
+    const newAchievements = await this.achievements.evaluateForHydration(userId);
 
-    return entry;
+    return { ...entry, newAchievements };
   }
 
   async removeEntry(userId: string, date: string, entryId: string) {

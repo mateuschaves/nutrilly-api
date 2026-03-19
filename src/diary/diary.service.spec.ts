@@ -62,7 +62,7 @@ describe('DiaryService', () => {
     // Safe defaults
     mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kcal', water: 'l', weight: 'kg', height: 'cm' });
     mockUnitsService.convertEnergy.mockImplementation((kcal: number) => Math.round(kcal));
-    mockAchievementsService.evaluateForDiary.mockResolvedValue(undefined);
+    mockAchievementsService.evaluateForDiary.mockResolvedValue([]);
   });
 
   it('should be defined', () => {
@@ -485,6 +485,52 @@ describe('DiaryService', () => {
           data: expect.objectContaining({ photoUri: null }),
         }),
       );
+    });
+
+    it('should include newAchievements as empty array when no achievements unlocked', async () => {
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry());
+      mockAchievementsService.evaluateForDiary.mockResolvedValue([]);
+
+      const result = await service.addEntry(USER_ID, DATE, MEAL_ID, dto);
+
+      expect(result).toHaveProperty('newAchievements');
+      expect(result.newAchievements).toEqual([]);
+    });
+
+    it('should include newAchievements with unlocked achievements when evaluateForDiary returns them', async () => {
+      const unlockedAchievement = {
+        key: 'FIRST_LOG',
+        name: 'First Step',
+        icon: '🌱',
+        description: 'Logged your first meal',
+        category: 'consistency',
+        earned: true,
+        earnedAt: '2025-03-15T07:30:00.000Z',
+      };
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry());
+      mockAchievementsService.evaluateForDiary.mockResolvedValue([unlockedAchievement]);
+
+      const result = await service.addEntry(USER_ID, DATE, MEAL_ID, dto);
+
+      expect(result.newAchievements).toHaveLength(1);
+      expect(result.newAchievements[0]).toEqual(unlockedAchievement);
+    });
+
+    it('should include multiple newAchievements when several are unlocked at once', async () => {
+      const achievements = [
+        { key: 'FIRST_LOG', name: 'First Step', icon: '🌱', description: 'Logged first meal', category: 'consistency', earned: true, earnedAt: '2025-03-15T07:30:00.000Z' },
+        { key: 'EARLY_BIRD', name: 'Early Bird', icon: 'E', description: 'Logged before 8am', category: 'behavior', earned: true, earnedAt: '2025-03-15T07:30:00.000Z' },
+      ];
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry());
+      mockAchievementsService.evaluateForDiary.mockResolvedValue(achievements);
+
+      const result = await service.addEntry(USER_ID, DATE, MEAL_ID, dto);
+
+      expect(result.newAchievements).toHaveLength(2);
+      expect(result.newAchievements.map((a) => a.key)).toEqual(['FIRST_LOG', 'EARLY_BIRD']);
     });
   });
 

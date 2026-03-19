@@ -12,9 +12,23 @@ function isGoodEntry(kcal: number, proteinG: number, carbsG: number, fatG: numbe
   return proteinPct >= 25 && fatPct <= 35;
 }
 
+function toDto(def: AchievementDefinition, earnedAt: Date | null): AchievementDto {
+  return {
+    key: def.key,
+    name: def.name,
+    icon: def.icon,
+    description: def.description,
+    category: def.category,
+    earned: earnedAt !== null,
+    earnedAt: earnedAt ? earnedAt.toISOString() : null,
+  };
+}
+
 @Injectable()
 export class AchievementsService {
   constructor(private prisma: PrismaService) {}
+
+  // ─── Public API ─────────────────────────────────────────────────────────────
 
   async getAchievements(userId: string, category?: string): Promise<AchievementDto[]> {
     await this.evaluateAll(userId);
@@ -27,20 +41,60 @@ export class AchievementsService {
       definitions = ACHIEVEMENTS.filter((a) => a.category === category);
     }
 
-    return definitions.map((def) => {
-      const earnedAt = earnedMap.get(def.key) ?? null;
-      return {
-        key: def.key,
-        name: def.name,
-        icon: def.icon,
-        description: def.description,
-        category: def.category,
-        earned: earnedAt !== null,
-        earnedAt: earnedAt ? earnedAt.toISOString() : null,
-      };
-    });
+    return definitions.map((def) => toDto(def, earnedMap.get(def.key) ?? null));
   }
 
+  /**
+   * Evaluates all checks, persists newly earned achievements and returns only
+   * the achievements unlocked by this specific action (not previously earned).
+   * Called after a diary entry is created.
+   */
+  async evaluateForDiary(userId: string): Promise<AchievementDto[]> {
+    const [alreadyEarned, checks] = await Promise.all([
+      this.prisma.userAchievement.findMany({
+        where: { userId },
+        select: { achievementKey: true },
+      }),
+      Promise.all([
+        this.checkFirstLog(userId),
+        this.checkStreaks(userId),
+        this.checkProteinPro(userId),
+        this.checkCalorieMaster(userId),
+        this.checkTripleCrown(userId),
+        this.checkQualityStreak(userId),
+        this.checkEarlyBird(userId),
+        this.checkPhotoFoodie(userId),
+        this.checkNightOwl(userId),
+        this.checkCenturion(userId),
+        this.checkWeekComplete(userId),
+      ]),
+    ]);
+
+    return this.persistAndReturn(userId, alreadyEarned, checks);
+  }
+
+  /**
+   * Evaluates hydration-related checks, persists newly earned achievements and
+   * returns only the achievements unlocked by this specific action.
+   * Called after a hydration entry is created.
+   */
+  async evaluateForHydration(userId: string): Promise<AchievementDto[]> {
+    const [alreadyEarned, checks] = await Promise.all([
+      this.prisma.userAchievement.findMany({
+        where: { userId },
+        select: { achievementKey: true },
+      }),
+      Promise.all([
+        this.checkHydrationHero(userId),
+        this.checkWaterWeek(userId),
+        this.checkTripleCrown(userId),
+      ]),
+    ]);
+
+    return this.persistAndReturn(userId, alreadyEarned, checks);
+  }
+
+  /** Full evaluation used by GET /achievements (returns void — caller fetches all). */
   async evaluateAll(userId: string): Promise<void> {
     const checks = await Promise.all([
       this.checkFirstLog(userId),
@@ -67,44 +121,29 @@ export class AchievementsService {
     });
   }
 
-  async evaluateForDiary(userId: string): Promise<void> {
-    const checks = await Promise.all([
-      this.checkFirstLog(userId),
-      this.checkStreaks(userId),
-      this.checkProteinPro(userId),
-      this.checkCalorieMaster(userId),
-      this.checkTripleCrown(userId),
-      this.checkQualityStreak(userId),
-      this.checkEarlyBird(userId),
-      this.checkPhotoFoodie(userId),
-      this.checkNightOwl(userId),
-      this.checkCenturion(userId),
-      this.checkWeekComplete(userId),
-    ]);
+  // ─── Internal helpers ────────────────────────────────────────────────────────
 
-    const newKeys = checks.flat().filter((k): k is string => k !== null);
-    if (newKeys.length === 0) return;
+  private async persistAndReturn(
+    userId: string,
+    alreadyEarned: { achievementKey: string }[],
+    checks: string[][],
+  ): Promise<AchievementDto[]> {
+    const alreadyEarnedSet = new Set(alreadyEarned.map((a) => a.achievementKey));
+    const unlocked = checks.flat().filter((k): k is string => k !== null);
+    const newKeys = unlocked.filter((k) => !alreadyEarnedSet.has(k));
+
+    if (newKeys.length === 0) return [];
+
+    const earnedAt = new Date();
 
     await this.prisma.userAchievement.createMany({
       data: newKeys.map((key) => ({ userId, achievementKey: key })),
       skipDuplicates: true,
     });
-  }
 
-  async evaluateForHydration(userId: string): Promise<void> {
-    const checks = await Promise.all([
-      this.checkHydrationHero(userId),
-      this.checkWaterWeek(userId),
-      this.checkTripleCrown(userId),
-    ]);
-
-    const newKeys = checks.flat().filter((k): k is string => k !== null);
-    if (newKeys.length === 0) return;
-
-    await this.prisma.userAchievement.createMany({
-      data: newKeys.map((key) => ({ userId, achievementKey: key })),
-      skipDuplicates: true,
-    });
+    return ACHIEVEMENTS
+      .filter((def) => newKeys.includes(def.key))
+      .map((def) => toDto(def, earnedAt));
   }
 
   // ─── Individual Checks ─────────────────────────────────────────────────────
@@ -317,7 +356,7 @@ export class AchievementsService {
 
     for (const dateStr of dateSet) {
       const date = new Date(dateStr);
-      const dayOfWeek = date.getUTCDay(); // 0=Sun
+      const dayOfWeek = date.getUTCDay();
       const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       const monday = new Date(date);
       monday.setUTCDate(date.getUTCDate() - daysFromMonday);

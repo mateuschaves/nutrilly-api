@@ -119,7 +119,7 @@ export class DiaryService {
     const energyUnit = units.energy as EnergyUnit;
     const energyUnitLabel = energyUnit === 'kj' ? 'kJ' : 'kcal';
 
-    await this.achievements.evaluateForDiary(userId);
+    const newAchievements = await this.achievements.evaluateForDiary(userId);
 
     return {
       id: entry.id,
@@ -133,6 +133,7 @@ export class DiaryService {
       time: formatTime(entry.loggedAt),
       photoUri: entry.photoUri,
       quality: classifyEntry(entry.kcal, entry.proteinG, entry.carbsG, entry.fatG),
+      newAchievements,
     };
   }
 

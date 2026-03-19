@@ -62,7 +62,7 @@ describe('HydrationService', () => {
       Math.round((ml / 1000) * 100) / 100,
     );
     mockPrisma.userProfile.findUnique.mockResolvedValue(defaultProfile);
-    mockAchievementsService.evaluateForHydration.mockResolvedValue(undefined);
+    mockAchievementsService.evaluateForHydration.mockResolvedValue([]);
   });
 
   it('should be defined', () => {
@@ -302,6 +302,49 @@ describe('HydrationService', () => {
 
       expect(result.amountMl).toBe(1);
       expect(mockAchievementsService.evaluateForHydration).toHaveBeenCalledWith(USER_ID);
+    });
+
+    it('should include newAchievements as empty array when no achievements unlocked', async () => {
+      mockPrisma.hydrationEntry.create.mockResolvedValue(makeEntry());
+      mockAchievementsService.evaluateForHydration.mockResolvedValue([]);
+
+      const result = await service.addEntry(USER_ID, DATE, { amountMl: 500 });
+
+      expect(result).toHaveProperty('newAchievements');
+      expect(result.newAchievements).toEqual([]);
+    });
+
+    it('should include newAchievements with unlocked achievements when evaluateForHydration returns them', async () => {
+      const unlockedAchievement = {
+        key: 'HYDRATION_HERO',
+        name: 'Hydration Hero',
+        icon: 'H',
+        description: 'Met your water goal',
+        category: 'hydration',
+        earned: true,
+        earnedAt: '2025-03-15T09:00:00.000Z',
+      };
+      mockPrisma.hydrationEntry.create.mockResolvedValue(makeEntry());
+      mockAchievementsService.evaluateForHydration.mockResolvedValue([unlockedAchievement]);
+
+      const result = await service.addEntry(USER_ID, DATE, { amountMl: 500 });
+
+      expect(result.newAchievements).toHaveLength(1);
+      expect(result.newAchievements[0]).toEqual(unlockedAchievement);
+    });
+
+    it('should include multiple newAchievements when several are unlocked at once', async () => {
+      const achievements = [
+        { key: 'HYDRATION_HERO', name: 'Hydration Hero', icon: 'H', description: 'Met water goal', category: 'hydration', earned: true, earnedAt: '2025-03-15T09:00:00.000Z' },
+        { key: 'WATER_WEEK', name: 'Water Week', icon: '💧', description: '7 days water goal', category: 'hydration', earned: true, earnedAt: '2025-03-15T09:00:00.000Z' },
+      ];
+      mockPrisma.hydrationEntry.create.mockResolvedValue(makeEntry());
+      mockAchievementsService.evaluateForHydration.mockResolvedValue(achievements);
+
+      const result = await service.addEntry(USER_ID, DATE, { amountMl: 500 });
+
+      expect(result.newAchievements).toHaveLength(2);
+      expect(result.newAchievements.map((a) => a.key)).toEqual(['HYDRATION_HERO', 'WATER_WEEK']);
     });
   });
 
