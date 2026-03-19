@@ -242,4 +242,128 @@ describe('AuthService', () => {
       ).rejects.toThrow();
     });
   });
+
+  describe('appleLogin', () => {
+    const buildAppleToken = (payload: object): string => {
+      const header = Buffer.from(JSON.stringify({ kid: 'test-key-id', alg: 'RS256' })).toString('base64url');
+      const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      return `${header}.${body}.fake-signature`;
+    };
+
+    const validPayload = {
+      iss: 'https://appleid.apple.com',
+      aud: 'mock-config-value',
+      sub: 'apple-sub-123',
+      email: 'apple@example.com',
+      email_verified: 'true',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      auth_time: Math.floor(Date.now() / 1000),
+      iat: Math.floor(Date.now() / 1000),
+    };
+
+    beforeEach(() => {
+      jest.spyOn(service as any, 'verifyAppleToken').mockResolvedValue(validPayload);
+    });
+
+    it('should return token for existing user with Apple ID', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'apple@example.com',
+        name: 'Existing User',
+        appleId: 'apple-sub-123',
+      });
+
+      const result = await service.appleLogin({
+        identityToken: buildAppleToken(validPayload),
+      });
+
+      expect(result.access_token).toBe('mock-token');
+      expect(result.user.email).toBe('apple@example.com');
+    });
+
+    it('should link Apple ID to existing account with same email', async () => {
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null) // appleId lookup
+        .mockResolvedValueOnce({ id: 'user-1', email: 'apple@example.com', name: 'Existing User' }); // email lookup
+
+      mockPrisma.user.update.mockResolvedValue({
+        id: 'user-1',
+        email: 'apple@example.com',
+        name: 'Existing User',
+        appleId: 'apple-sub-123',
+      });
+
+      const result = await service.appleLogin({
+        identityToken: buildAppleToken(validPayload),
+      });
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { appleId: 'apple-sub-123' },
+      });
+      expect(result.access_token).toBe('mock-token');
+    });
+
+    it('should create a new user for a new Apple account and seed meals', async () => {
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null) // appleId lookup
+        .mockResolvedValueOnce(null); // email lookup
+
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'new-user-1',
+        email: 'apple@example.com',
+        name: 'Full Name',
+        appleId: 'apple-sub-123',
+      });
+      mockMealsService.seedDefaultMeals.mockResolvedValue(undefined);
+
+      const result = await service.appleLogin({
+        identityToken: buildAppleToken(validPayload),
+        fullName: 'Full Name',
+      });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          email: 'apple@example.com',
+          name: 'Full Name',
+          appleId: 'apple-sub-123',
+        }),
+      });
+      expect(mockMealsService.seedDefaultMeals).toHaveBeenCalledWith('new-user-1');
+      expect(result.access_token).toBe('mock-token');
+    });
+
+    it('should use "Apple User" as name when fullName is not provided', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'u2',
+        email: 'apple@example.com',
+        name: 'Apple User',
+        appleId: 'apple-sub-123',
+      });
+      mockMealsService.seedDefaultMeals.mockResolvedValue(undefined);
+
+      await service.appleLogin({ identityToken: buildAppleToken(validPayload) });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ name: 'Apple User' }),
+      });
+    });
+
+    it('should throw UnauthorizedException when Apple token has no email', async () => {
+      jest.spyOn(service as any, 'verifyAppleToken').mockResolvedValue({ ...validPayload, email: undefined });
+
+      await expect(
+        service.appleLogin({ identityToken: buildAppleToken(validPayload) }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException for malformed token (not 3 parts)', async () => {
+      jest.spyOn(service as any, 'verifyAppleToken').mockRestore();
+
+      await expect(
+        service.appleLogin({ identityToken: 'not.valid' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
 });
