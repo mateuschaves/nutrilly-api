@@ -19,6 +19,7 @@ model User {
   meals            Meal[]
   diaryEntries     DiaryEntry[]
   hydrationEntries HydrationEntry[]
+  weightLogs       WeightLog[]
   achievements     UserAchievement[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
@@ -105,6 +106,18 @@ model HydrationEntry {
   @@map("hydration_entries")
 }
 
+model WeightLog {
+  id       String   @id @default(cuid())
+  userId   String
+  weightKg Float
+  source   String   // WeightSource enum: "APPLE_HEALTH" | "SAMSUNG_HEALTH" | "GOOGLE_FIT" | "MANUAL"
+  loggedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+  @@map("weight_logs")
+}
 model UserAchievement {
   id             String   @id @default(cuid())
   userId         String

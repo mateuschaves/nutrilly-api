@@ -209,5 +209,55 @@ describe('DashboardService', () => {
       ]);
       expect(await service.computeStreak('user-1', '2025-03-15')).toBe(3);
     });
+
+    it('should return 1 when only today has an entry', async () => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([{ date: '2025-03-15' }]);
+      expect(await service.computeStreak('user-1', '2025-03-15')).toBe(1);
+    });
+
+    it('should return 1 when only yesterday has an entry', async () => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([{ date: '2025-03-14' }]);
+      expect(await service.computeStreak('user-1', '2025-03-15')).toBe(1);
+    });
+
+    it('should count a 3-day streak starting from today', async () => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { date: '2025-03-15' },
+        { date: '2025-03-14' },
+        { date: '2025-03-13' },
+      ]);
+      expect(await service.computeStreak('user-1', '2025-03-15')).toBe(3);
+    });
+  });
+
+  describe('calories remaining', () => {
+    beforeEach(() => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([]);
+      mockPrisma.diaryEntry.findFirst.mockResolvedValue(null);
+      mockPrisma.hydrationEntry.aggregate.mockResolvedValue({ _sum: { amountMl: 0 } });
+    });
+
+    it('should return 0 consumed when no diary entries exist', async () => {
+      mockPrisma.userProfile.findUnique.mockResolvedValue({ caloriesGoal: 2000, waterGoalMl: 2000 });
+      mockPrisma.diaryEntry.aggregate.mockResolvedValue({
+        _sum: { kcal: null, proteinG: null, carbsG: null, fatG: null },
+      });
+
+      const result = await service.getDailySummary('user-1', '2025-03-15');
+
+      expect(result.calories.consumed).toBe(0);
+      expect(result.calories.goal).toBe(2000);
+    });
+
+    it('should return correct consumed calories', async () => {
+      mockPrisma.userProfile.findUnique.mockResolvedValue({ caloriesGoal: 2000, waterGoalMl: 2000 });
+      mockPrisma.diaryEntry.aggregate.mockResolvedValue({
+        _sum: { kcal: 1500, proteinG: 80, carbsG: 150, fatG: 50 },
+      });
+
+      const result = await service.getDailySummary('user-1', '2025-03-15');
+
+      expect(result.calories.consumed).toBe(1500);
+    });
   });
 });

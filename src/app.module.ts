@@ -8,6 +8,7 @@ import { MealsModule } from './meals/meals.module';
 import { DiaryModule } from './diary/diary.module';
 import { HydrationModule } from './hydration/hydration.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { WeightModule } from './weight/weight.module';
 import { R2Module } from './r2/r2.module';
 import { AchievementsModule } from './achievements/achievements.module';
 
@@ -23,6 +24,7 @@ import { AchievementsModule } from './achievements/achievements.module';
     DiaryModule,
     HydrationModule,
     DashboardModule,
+    WeightModule,
     R2Module,
   ],
 })

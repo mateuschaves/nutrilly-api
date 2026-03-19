@@ -3,31 +3,6 @@ import { ProfileService } from './profile.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
 
-const USER_ID = 'user-1';
-
-const makeUser = (overrides = {}) => ({
-  id: USER_ID,
-  name: 'John',
-  email: 'john@example.com',
-  ...overrides,
-});
-
-const makeProfile = (overrides = {}) => ({
-  userId: USER_ID,
-  birthdate: '1990-01-01',
-  sex: 'male',
-  weightKg: 80,
-  heightCm: 180,
-  goal: 'lose_weight',
-  activityLevel: 'active',
-  caloriesGoal: 2200,
-  waterGoalMl: 2600,
-  proteinGoalG: 150,
-  carbsGoalG: 250,
-  fatGoalG: 70,
-  ...overrides,
-});
-
 describe('ProfileService', () => {
   let service: ProfileService;
 
@@ -35,12 +10,18 @@ describe('ProfileService', () => {
     user: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
     userProfile: { findUnique: jest.fn(), upsert: jest.fn() },
     userUnitPreferences: { upsert: jest.fn() },
+    weightLog: { findMany: jest.fn() },
+    diaryEntry: { findMany: jest.fn() },
+    hydrationEntry: { findMany: jest.fn() },
   };
 
+  const defaultUnits = { energy: 'kcal', water: 'l', weight: 'kg', height: 'cm' };
+
   const mockUnitsService = {
-    getUserUnits: jest.fn(),
-    convertEnergy: jest.fn().mockImplementation((kcal: number) => kcal),
-    convertWater: jest.fn().mockImplementation((ml: number) => ml / 1000),
+    getUserUnits: jest.fn().mockResolvedValue(defaultUnits),
+    convertEnergy: jest.fn().mockImplementation((kcal: number) => Math.round(kcal)),
+    convertWater: jest.fn().mockImplementation((ml: number) => Math.round((ml / 1000) * 100) / 100),
+    convertWeight: jest.fn().mockImplementation((kg: number) => Math.round(kg * 10) / 10),
   };
 
   beforeEach(async () => {
@@ -54,230 +35,338 @@ describe('ProfileService', () => {
 
     service = module.get<ProfileService>(ProfileService);
     jest.clearAllMocks();
-
-    mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kcal', water: 'l', weight: 'kg', height: 'cm' });
-    mockUnitsService.convertEnergy.mockImplementation((kcal: number) => kcal);
-    mockUnitsService.convertWater.mockImplementation((ml: number) => ml / 1000);
+    mockUnitsService.getUserUnits.mockResolvedValue(defaultUnits);
+    mockUnitsService.convertEnergy.mockImplementation((kcal: number) => Math.round(kcal));
+    mockUnitsService.convertWater.mockImplementation((ml: number) => Math.round((ml / 1000) * 100) / 100);
+    mockUnitsService.convertWeight.mockImplementation((kg: number) => Math.round(kg * 10) / 10);
   });
 
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
 
-  // ─── getProfile ──────────────────────────────────────────────────────────────
+  // ── getProfileScreen ───────────────────────────────────────────
 
-  describe('getProfile', () => {
-    it('should return full profile when user and profile exist', async () => {
-      mockPrisma.user.findUniqueOrThrow.mockResolvedValue(makeUser());
-      mockPrisma.userProfile.findUnique.mockResolvedValue(makeProfile());
+  describe('getProfileScreen', () => {
+    const baseUser = { id: 'u1', name: 'Mateus Henrique', email: 'mateus@nutrilly.app' };
+    const baseProfile = {
+      birthdate: '1996-03-19',
+      sex: 'male',
+      weightKg: 78,
+      heightCm: 178,
+      goal: 'gain_muscle',
+      activityLevel: 'active',
+      caloriesGoal: 2200,
+      proteinGoalG: 150,
+      carbsGoalG: 250,
+      fatGoalG: 70,
+      waterGoalMl: 2600,
+    };
 
-      const result = await service.getProfile(USER_ID);
-
-      expect(result.name).toBe('John');
-      expect(result.email).toBe('john@example.com');
-      expect(result.birthdate).toBe('1990-01-01');
-      expect(result.sex).toBe('male');
-      expect(result.weightKg).toBe(80);
-      expect(result.heightCm).toBe(180);
-      expect(result.goal).toBe('lose_weight');
-      expect(result.activityLevel).toBe('active');
+    beforeEach(() => {
+      mockPrisma.user.findUniqueOrThrow.mockResolvedValue(baseUser);
+      mockPrisma.userProfile.findUnique.mockResolvedValue(baseProfile);
+      mockPrisma.weightLog.findMany.mockResolvedValue([]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([]);
+      mockPrisma.hydrationEntry.findMany.mockResolvedValue([]);
     });
 
-    it('should return null for optional profile fields when no profile exists', async () => {
-      mockPrisma.user.findUniqueOrThrow.mockResolvedValue(makeUser());
-      mockPrisma.userProfile.findUnique.mockResolvedValue(null);
+    it('should return name, email, and initials', async () => {
+      const result = await service.getProfileScreen('u1');
+      expect(result.name).toBe('Mateus Henrique');
+      expect(result.email).toBe('mateus@nutrilly.app');
+      expect(result.initials).toBe('MH');
+    });
 
-      const result = await service.getProfile(USER_ID);
+    it('should build initials from single-word name', async () => {
+      mockPrisma.user.findUniqueOrThrow.mockResolvedValue({ ...baseUser, name: 'Mateus' });
+      const result = await service.getProfileScreen('u1');
+      expect(result.initials).toBe('M');
+    });
 
-      expect(result.birthdate).toBeNull();
-      expect(result.sex).toBeNull();
-      expect(result.weightKg).toBeNull();
-      expect(result.heightCm).toBeNull();
+    it('should build initials from more than two words using only first two', async () => {
+      mockPrisma.user.findUniqueOrThrow.mockResolvedValue({ ...baseUser, name: 'Mateus Henrique Chaves' });
+      const result = await service.getProfileScreen('u1');
+      expect(result.initials).toBe('MH');
+    });
+
+    it('should return the goal from profile', async () => {
+      const result = await service.getProfileScreen('u1');
+      expect(result.goal).toBe('gain_muscle');
+    });
+
+    it('should return null goal when profile has no goal', async () => {
+      mockPrisma.userProfile.findUnique.mockResolvedValue({ ...baseProfile, goal: null });
+      const result = await service.getProfileScreen('u1');
       expect(result.goal).toBeNull();
-      expect(result.activityLevel).toBeNull();
     });
 
-    it('should use default goals when no profile exists', async () => {
-      mockPrisma.user.findUniqueOrThrow.mockResolvedValue(makeUser());
+    it('should return null goal when profile does not exist', async () => {
       mockPrisma.userProfile.findUnique.mockResolvedValue(null);
-
-      const result = await service.getProfile(USER_ID);
-
-      expect(result.dailyGoals.calories.value).toBe(2200); // default
-      expect(result.dailyGoals.proteinG).toBe(150);        // default
-      expect(result.dailyGoals.carbsG).toBe(250);          // default
-      expect(result.dailyGoals.fatG).toBe(70);             // default
-      expect(result.dailyGoals.water.value).toBe(2.6);     // 2600ml → 2.6L
+      const result = await service.getProfileScreen('u1');
+      expect(result.goal).toBeNull();
     });
 
-    it('should use profile goals when profile exists', async () => {
-      mockPrisma.user.findUniqueOrThrow.mockResolvedValue(makeUser());
-      mockPrisma.userProfile.findUnique.mockResolvedValue(
-        makeProfile({ caloriesGoal: 1800, waterGoalMl: 3000, proteinGoalG: 180, carbsGoalG: 200, fatGoalG: 60 }),
-      );
+    describe('bodyStats', () => {
+      it('should return converted weight and unit', async () => {
+        mockUnitsService.convertWeight.mockReturnValue(78.0);
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.weight).toEqual({ value: 78.0, unit: 'kg' });
+      });
 
-      const result = await service.getProfile(USER_ID);
+      it('should return null weight when profile has no weight', async () => {
+        mockPrisma.userProfile.findUnique.mockResolvedValue({ ...baseProfile, weightKg: null });
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.weight).toBeNull();
+      });
 
-      expect(result.dailyGoals.calories.value).toBe(1800);
-      expect(result.dailyGoals.proteinG).toBe(180);
-      expect(result.dailyGoals.carbsG).toBe(200);
-      expect(result.dailyGoals.fatG).toBe(60);
-      expect(result.dailyGoals.water.value).toBe(3); // 3000ml → 3L
+      it('should return height in cm format', async () => {
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.height).toEqual({ cm: 178, feet: null, inches: null, unit: 'cm' });
+      });
+
+      it('should return height in ft_in format', async () => {
+        mockUnitsService.getUserUnits.mockResolvedValue({ ...defaultUnits, height: 'ft_in' });
+        // 178cm → ~70.07 inches → 5ft 10in
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.height).toMatchObject({ cm: null, feet: 5, inches: 10, unit: 'ft_in' });
+      });
+
+      it('should return null height when profile has no height', async () => {
+        mockPrisma.userProfile.findUnique.mockResolvedValue({ ...baseProfile, heightCm: null });
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.height).toBeNull();
+      });
+
+      it('should calculate age from birthdate', async () => {
+        // birthdate 1996-03-19, today is 2026-03-19 → 30 years old
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.age).toBe(30);
+      });
+
+      it('should return null age when birthdate is missing', async () => {
+        mockPrisma.userProfile.findUnique.mockResolvedValue({ ...baseProfile, birthdate: null });
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.age).toBeNull();
+      });
+
+      it('should calculate BMI from weight and height', async () => {
+        // 78 / (1.78^2) = 24.6
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.bmi).toBeCloseTo(24.6, 0);
+      });
+
+      it('should return null BMI when weight is missing', async () => {
+        mockPrisma.userProfile.findUnique.mockResolvedValue({ ...baseProfile, weightKg: null });
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.bmi).toBeNull();
+      });
+
+      it('should return null BMI when height is missing', async () => {
+        mockPrisma.userProfile.findUnique.mockResolvedValue({ ...baseProfile, heightCm: null });
+        const result = await service.getProfileScreen('u1');
+        expect(result.bodyStats.bmi).toBeNull();
+      });
     });
 
-    it('should include energy and water units in daily goals', async () => {
-      mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kj', water: 'fl_oz', weight: 'kg', height: 'cm' });
-      mockPrisma.user.findUniqueOrThrow.mockResolvedValue(makeUser());
-      mockPrisma.userProfile.findUnique.mockResolvedValue(null);
+    describe('weightProgress', () => {
+      it('should return empty entries and null stats when no logs exist', async () => {
+        const result = await service.getProfileScreen('u1');
+        expect(result.weightProgress.entries).toHaveLength(0);
+        expect(result.weightProgress.totalEntries).toBe(0);
+        expect(result.weightProgress.min).toBeNull();
+        expect(result.weightProgress.max).toBeNull();
+        expect(result.weightProgress.change).toBeNull();
+      });
 
-      const result = await service.getProfile(USER_ID);
+      it('should return entries converted to user weight unit', async () => {
+        mockUnitsService.convertWeight.mockReturnValue(171.9);
+        mockPrisma.weightLog.findMany.mockResolvedValue([
+          { weightKg: 78, loggedAt: new Date('2026-02-11T08:00:00Z') },
+        ]);
+        const result = await service.getProfileScreen('u1');
+        expect(result.weightProgress.entries).toHaveLength(1);
+        expect(result.weightProgress.entries[0]).toMatchObject({ date: '2026-02-11', unit: 'kg' });
+      });
 
-      expect(result.dailyGoals.calories.unit).toBe('kj');
-      expect(result.dailyGoals.water.unit).toBe('fl_oz');
+      it('should calculate min, max and overall change with direction up', async () => {
+        mockUnitsService.convertWeight.mockImplementation((kg: number) => kg);
+        mockPrisma.weightLog.findMany.mockResolvedValue([
+          { weightKg: 70, loggedAt: new Date('2026-01-01') },
+          { weightKg: 78, loggedAt: new Date('2026-03-01') },
+        ]);
+
+        const result = await service.getProfileScreen('u1');
+        expect(result.weightProgress.min!.value).toBe(70);
+        expect(result.weightProgress.max!.value).toBe(78);
+        expect(result.weightProgress.change!.direction).toBe('up');
+        expect(result.weightProgress.change!.value).toBe(8);
+      });
+
+      it('should return direction down when weight decreased', async () => {
+        mockUnitsService.convertWeight.mockImplementation((kg: number) => kg);
+        mockPrisma.weightLog.findMany.mockResolvedValue([
+          { weightKg: 90, loggedAt: new Date('2026-01-01') },
+          { weightKg: 78, loggedAt: new Date('2026-03-01') },
+        ]);
+        const result = await service.getProfileScreen('u1');
+        expect(result.weightProgress.change!.direction).toBe('down');
+      });
+
+      it('should return direction stable when weight did not change', async () => {
+        mockUnitsService.convertWeight.mockImplementation((kg: number) => kg);
+        mockPrisma.weightLog.findMany.mockResolvedValue([
+          { weightKg: 78, loggedAt: new Date('2026-01-01') },
+          { weightKg: 78, loggedAt: new Date('2026-03-01') },
+        ]);
+        const result = await service.getProfileScreen('u1');
+        expect(result.weightProgress.change!.direction).toBe('stable');
+      });
+
+      it('should report totalEntries correctly', async () => {
+        mockUnitsService.convertWeight.mockImplementation((kg: number) => kg);
+        mockPrisma.weightLog.findMany.mockResolvedValue([
+          { weightKg: 70, loggedAt: new Date('2026-01-01') },
+          { weightKg: 74, loggedAt: new Date('2026-02-01') },
+          { weightKg: 78, loggedAt: new Date('2026-03-01') },
+        ]);
+        const result = await service.getProfileScreen('u1');
+        expect(result.weightProgress.totalEntries).toBe(3);
+      });
+    });
+
+    describe('dailyGoals', () => {
+      it('should sum calories from today diary entries', async () => {
+        mockPrisma.diaryEntry.findMany.mockResolvedValue([
+          { kcal: 500, proteinG: 30, carbsG: 60, fatG: 10 },
+          { kcal: 300, proteinG: 15, carbsG: 40, fatG: 5 },
+        ]);
+        mockUnitsService.convertEnergy.mockImplementation((kcal: number) => kcal);
+        const result = await service.getProfileScreen('u1');
+        expect(result.dailyGoals.calories.consumed).toBe(800);
+        expect(result.dailyGoals.calories.goal).toBe(2200);
+      });
+
+      it('should sum protein from today diary entries', async () => {
+        mockPrisma.diaryEntry.findMany.mockResolvedValue([
+          { kcal: 200, proteinG: 30.4, carbsG: 20, fatG: 5 },
+          { kcal: 200, proteinG: 17.6, carbsG: 20, fatG: 5 },
+        ]);
+        const result = await service.getProfileScreen('u1');
+        expect(result.dailyGoals.protein.consumed).toBe(48); // Math.round(48.0)
+        expect(result.dailyGoals.protein.goal).toBe(150);
+      });
+
+      it('should sum water from today hydration entries', async () => {
+        mockPrisma.hydrationEntry.findMany.mockResolvedValue([
+          { amountMl: 500 },
+          { amountMl: 300 },
+        ]);
+        mockUnitsService.convertWater.mockImplementation((ml: number) => ml / 1000);
+        const result = await service.getProfileScreen('u1');
+        expect(result.dailyGoals.water.consumed).toBe(0.8);
+        expect(result.dailyGoals.water.goal).toBe(2.6);
+      });
+
+      it('should return zero consumed when no diary entries today', async () => {
+        mockUnitsService.convertEnergy.mockImplementation((kcal: number) => kcal);
+        const result = await service.getProfileScreen('u1');
+        expect(result.dailyGoals.calories.consumed).toBe(0);
+        expect(result.dailyGoals.protein.consumed).toBe(0);
+      });
+
+      it('should use default goals when profile is null', async () => {
+        mockPrisma.userProfile.findUnique.mockResolvedValue(null);
+        mockUnitsService.convertEnergy.mockImplementation((kcal: number) => kcal);
+        const result = await service.getProfileScreen('u1');
+        expect(result.dailyGoals.calories.goal).toBe(2200);
+        expect(result.dailyGoals.protein.goal).toBe(150);
+      });
     });
   });
 
-  // ─── updateProfile ───────────────────────────────────────────────────────────
+  // ── updateProfile ──────────────────────────────────────────────
 
   describe('updateProfile', () => {
     beforeEach(() => {
-      mockPrisma.user.findUniqueOrThrow.mockResolvedValue(makeUser());
-      mockPrisma.userProfile.findUnique.mockResolvedValue(makeProfile());
+      mockPrisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', name: 'Mateus', email: 'mateus@nutrilly.app' });
+      mockPrisma.userProfile.findUnique.mockResolvedValue(null);
+      mockPrisma.weightLog.findMany.mockResolvedValue([]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([]);
+      mockPrisma.hydrationEntry.findMany.mockResolvedValue([]);
     });
 
-    it('should update user name when name is provided', async () => {
-      mockPrisma.user.update.mockResolvedValue(makeUser({ name: 'Jane' }));
-
-      await service.updateProfile(USER_ID, { name: 'Jane' });
-
+    it('should update user name when provided', async () => {
+      mockPrisma.user.update.mockResolvedValue({});
+      mockPrisma.userProfile.upsert.mockResolvedValue({});
+      await service.updateProfile('u1', { name: 'New Name', weightKg: 80 });
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
-        where: { id: USER_ID },
-        data: { name: 'Jane' },
+        where: { id: 'u1' },
+        data: { name: 'New Name' },
       });
     });
 
-    it('should NOT update user name when name is not provided', async () => {
-      await service.updateProfile(USER_ID, { weightKg: 75 });
-
-      expect(mockPrisma.user.update).not.toHaveBeenCalled();
-    });
-
-    it('should upsert profile when profile fields are provided', async () => {
-      await service.updateProfile(USER_ID, { weightKg: 75, sex: 'male' });
-
+    it('should upsert profile fields when provided', async () => {
+      mockPrisma.userProfile.upsert.mockResolvedValue({});
+      await service.updateProfile('u1', { weightKg: 80, heightCm: 178 });
       expect(mockPrisma.userProfile.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId: USER_ID },
-          create: expect.objectContaining({ userId: USER_ID, weightKg: 75, sex: 'male' }),
-          update: expect.objectContaining({ weightKg: 75, sex: 'male' }),
+          where: { userId: 'u1' },
+          create: expect.objectContaining({ weightKg: 80, heightCm: 178 }),
+          update: expect.objectContaining({ weightKg: 80, heightCm: 178 }),
         }),
       );
     });
 
-    it('should NOT call upsert when no profile fields are provided', async () => {
-      await service.updateProfile(USER_ID, {});
-
+    it('should not call upsert when no profile fields are provided', async () => {
+      await service.updateProfile('u1', { name: 'Only Name' });
       expect(mockPrisma.userProfile.upsert).not.toHaveBeenCalled();
     });
 
-    it('should update dailyGoals.calories as caloriesGoal in profile', async () => {
-      await service.updateProfile(USER_ID, { dailyGoals: { calories: 1800 } });
-
-      expect(mockPrisma.userProfile.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({ caloriesGoal: 1800 }),
-        }),
-      );
-    });
-
-    it('should update dailyGoals.waterMl as waterGoalMl in profile', async () => {
-      await service.updateProfile(USER_ID, { dailyGoals: { waterMl: 3000 } });
-
-      expect(mockPrisma.userProfile.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({ waterGoalMl: 3000 }),
-        }),
-      );
-    });
-
-    it('should return updated profile after changes', async () => {
-      mockPrisma.user.update.mockResolvedValue(makeUser({ name: 'Jane' }));
-      mockPrisma.user.findUniqueOrThrow.mockResolvedValue(makeUser({ name: 'Jane' }));
-
-      const result = await service.updateProfile(USER_ID, { name: 'Jane' });
-
-      expect(result).toHaveProperty('name');
-      expect(result).toHaveProperty('email');
-      expect(result).toHaveProperty('dailyGoals');
-    });
-
-    it('should run name update and profile upsert in parallel', async () => {
-      const callOrder: string[] = [];
-      mockPrisma.user.update.mockImplementation(() => {
-        callOrder.push('user.update');
-        return Promise.resolve(makeUser({ name: 'Jane' }));
-      });
-      mockPrisma.userProfile.upsert.mockImplementation(() => {
-        callOrder.push('profile.upsert');
-        return Promise.resolve(makeProfile());
-      });
-
-      await service.updateProfile(USER_ID, { name: 'Jane', weightKg: 75 });
-
-      // Both should be called (order not deterministic due to Promise.all)
-      expect(callOrder).toContain('user.update');
-      expect(callOrder).toContain('profile.upsert');
+    it('should not call user.update when name is not provided', async () => {
+      mockPrisma.userProfile.upsert.mockResolvedValue({});
+      await service.updateProfile('u1', { weightKg: 80 });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
   });
 
-  // ─── getUnits ────────────────────────────────────────────────────────────────
+  // ── getProfile (basic) ─────────────────────────────────────────
 
-  describe('getUnits', () => {
-    it('should delegate to UnitsService.getUserUnits', async () => {
-      mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kj', water: 'fl_oz', weight: 'lbs', height: 'ft_in' });
-
-      const result = await service.getUnits(USER_ID);
-
-      expect(result).toEqual({ energy: 'kj', water: 'fl_oz', weight: 'lbs', height: 'ft_in' });
-      expect(mockUnitsService.getUserUnits).toHaveBeenCalledWith(USER_ID);
-    });
-  });
-
-  // ─── updateUnits ─────────────────────────────────────────────────────────────
-
-  describe('updateUnits', () => {
-    it('should upsert unit preferences with provided fields', async () => {
-      mockPrisma.userUnitPreferences.upsert.mockResolvedValue({});
-      mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kj', water: 'l', weight: 'kg', height: 'cm' });
-
-      await service.updateUnits(USER_ID, { energy: 'kj' });
-
-      expect(mockPrisma.userUnitPreferences.upsert).toHaveBeenCalledWith({
-        where: { userId: USER_ID },
-        create: { userId: USER_ID, energy: 'kj' },
-        update: { energy: 'kj' },
+  describe('getProfile', () => {
+    it('should return daily goals with converted energy and water values', async () => {
+      mockPrisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', name: 'Mateus', email: 'mateus@nutrilly.app' });
+      mockPrisma.userProfile.findUnique.mockResolvedValue({
+        caloriesGoal: 2200,
+        waterGoalMl: 2600,
+        proteinGoalG: 150,
+        carbsGoalG: 250,
+        fatGoalG: 70,
+        weightKg: null,
+        heightCm: null,
+        birthdate: null,
+        sex: null,
+        goal: null,
+        activityLevel: null,
       });
+      mockUnitsService.convertEnergy.mockReturnValue(9205);
+      mockUnitsService.convertWater.mockReturnValue(2.6);
+
+      const result = await service.getProfile('u1');
+
+      expect(result.dailyGoals.calories.value).toBe(9205);
+      expect(result.dailyGoals.water.value).toBe(2.6);
     });
 
-    it('should return updated units after upsert', async () => {
-      mockPrisma.userUnitPreferences.upsert.mockResolvedValue({});
-      mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kj', water: 'fl_oz', weight: 'lbs', height: 'cm' });
+    it('should return null fields when profile does not exist', async () => {
+      mockPrisma.user.findUniqueOrThrow.mockResolvedValue({ id: 'u1', name: 'Mateus', email: 'mateus@nutrilly.app' });
+      mockPrisma.userProfile.findUnique.mockResolvedValue(null);
 
-      const result = await service.updateUnits(USER_ID, { energy: 'kj', water: 'fl_oz', weight: 'lbs' });
+      const result = await service.getProfile('u1');
 
-      expect(result).toEqual({ energy: 'kj', water: 'fl_oz', weight: 'lbs', height: 'cm' });
-    });
-
-    it('should only include defined fields in upsert data', async () => {
-      mockPrisma.userUnitPreferences.upsert.mockResolvedValue({});
-      mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kcal', water: 'l', weight: 'kg', height: 'cm' });
-
-      await service.updateUnits(USER_ID, { water: 'fl_oz' });
-
-      const callArg = mockPrisma.userUnitPreferences.upsert.mock.calls[0][0];
-      expect(callArg.update).toEqual({ water: 'fl_oz' });
-      expect(callArg.update).not.toHaveProperty('energy');
-      expect(callArg.update).not.toHaveProperty('weight');
+      expect(result.weightKg).toBeNull();
+      expect(result.heightCm).toBeNull();
+      expect(result.birthdate).toBeNull();
+      expect(result.goal).toBeNull();
     });
   });
 });
