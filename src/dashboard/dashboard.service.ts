@@ -2,6 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
 import { EnergyUnit, WaterUnit } from '../units/units.types';
+import { computeStreak } from './streak.utils';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -86,26 +87,9 @@ export class DashboardService {
       orderBy: { date: 'desc' },
     });
 
-    if (rows.length === 0) return 0;
-
-    const today = referenceDate;
-    const yesterday = new Date(new Date(today).getTime() - 86_400_000)
-      .toISOString()
-      .split('T')[0];
-
-    const dates = rows.map((r) => r.date);
-    if (dates[0] !== today && dates[0] !== yesterday) return 0;
-
-    let streak = 1;
-    for (let i = 1; i < dates.length; i++) {
-      const prev = new Date(dates[i - 1]).getTime();
-      const curr = new Date(dates[i]).getTime();
-      if (Math.round((prev - curr) / 86_400_000) === 1) {
-        streak++;
-      } else {
-        break;
-      }
-    }
-    return streak;
+    return computeStreak(
+      rows.map((r) => r.date),
+      referenceDate,
+    );
   }
 }

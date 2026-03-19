@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
+import { AchievementsService } from '../achievements/achievements.service';
 import { CreateDiaryEntryDto } from './dto/create-diary-entry.dto';
 import { EnergyUnit } from '../units/units.types';
 import { EntryQuality } from './diary.types';
@@ -45,6 +46,7 @@ export class DiaryService {
   constructor(
     private prisma: PrismaService,
     private unitsService: UnitsService,
+    private achievements: AchievementsService,
   ) {}
 
   async getByDate(userId: string, date: string) {
@@ -116,6 +118,8 @@ export class DiaryService {
 
     const energyUnit = units.energy as EnergyUnit;
     const energyUnitLabel = energyUnit === 'kj' ? 'kJ' : 'kcal';
+
+    await this.achievements.evaluateForDiary(userId);
 
     return {
       id: entry.id,
