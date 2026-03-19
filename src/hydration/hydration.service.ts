@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
+import { AchievementsService } from '../achievements/achievements.service';
 import { CreateHydrationEntryDto } from './dto/create-hydration-entry.dto';
 import { WaterUnit } from '../units/units.types';
 
@@ -11,6 +12,7 @@ export class HydrationService {
   constructor(
     private prisma: PrismaService,
     private unitsService: UnitsService,
+    private achievements: AchievementsService,
   ) {}
 
   async getByDate(userId: string, date: string) {
@@ -46,7 +48,9 @@ export class HydrationService {
       select: { id: true, amountMl: true, loggedAt: true },
     });
 
-    return entry;
+    const newAchievements = await this.achievements.evaluateForHydration(userId);
+
+    return { ...entry, newAchievements };
   }
 
   async removeEntry(userId: string, date: string, entryId: string) {

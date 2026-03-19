@@ -9,6 +9,7 @@ import { DiaryModule } from './diary/diary.module';
 import { HydrationModule } from './hydration/hydration.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { R2Module } from './r2/r2.module';
+import { AchievementsModule } from './achievements/achievements.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { R2Module } from './r2/r2.module';
     UnitsModule,
     ProfileModule,
     MealsModule,
+    AchievementsModule,
     DiaryModule,
     HydrationModule,
     DashboardModule,
