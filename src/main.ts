@@ -48,7 +48,10 @@ Authorization: Bearer <access_token>
     )
     .build();
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup('api/docs', app, document, {
+    useGlobalPrefix: false,
+    swaggerOptions: { persistAuthorization: true },
+  });
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
