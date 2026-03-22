@@ -21,6 +21,8 @@ model User {
   hydrationEntries HydrationEntry[]
   weightLogs       WeightLog[]
   achievements     UserAchievement[]
+  tournamentMemberships  TournamentMember[]
+  tournamentActivities   TournamentActivity[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 
@@ -129,4 +131,86 @@ model UserAchievement {
 
   @@unique([userId, achievementKey])
   @@map("user_achievements")
+}
+
+// ─── Tournaments ────────────────────────────────────────────────────────────
+
+model Tournament {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
+  description String
+  bannerUri   String?
+  inviteCode  String    @unique
+  startDate   DateTime
+  endDate     DateTime?
+  status      String    @default("UPCOMING") // UPCOMING | ACTIVE | ENDED
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  members      TournamentMember[]
+  activities   TournamentActivity[]
+  scoringRules TournamentScoringRule[]
+
+  @@map("tournaments")
+}
+
+model TournamentMember {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  tournamentId String   @db.ObjectId
+  userId       String   @db.ObjectId
+  role         String   @default("MEMBER") // MEMBER | ADMIN
+  points       Int      @default(0)
+  position     Int      @default(0)
+  joinedAt     DateTime @default(now())
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@unique([tournamentId, userId])
+  @@index([tournamentId])
+  @@map("tournament_members")
+}
+
+model TournamentScoringRule {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  tournamentId String   @db.ObjectId
+  type         String   // ScoringRuleType: MEAL_LOGGED | HEALTHY_MEAL | UNHEALTHY_MEAL | DAILY_GOAL_MET | WATER_GOAL_MET | CALORIES_BURNED | WEIGHT_LOSS
+  label        String
+  description  String
+  points       Int
+  enabled      Boolean  @default(true)
+  unit         String?
+  emoji        String
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+
+  @@unique([tournamentId, type])
+  @@map("tournament_scoring_rules")
+}
+
+model TournamentActivity {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  tournamentId   String   @db.ObjectId
+  userId         String   @db.ObjectId
+  type           String   // ScoringRuleType
+  label          String
+  points         Int
+  emoji          String
+  date           String   // YYYY-MM-DD
+  time           String   // HH:MM
+  calories       Float?
+  mealName       String?
+  weightKg       Float?
+  caloriesBurned Float?
+  waterLiters    Float?
+  protein        Float?
+  carbs          Float?
+  fat            Float?
+  createdAt      DateTime @default(now())
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@index([tournamentId, createdAt])
+  @@map("tournament_activities")
 }
