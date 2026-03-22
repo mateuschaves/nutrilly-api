@@ -69,7 +69,7 @@ describe('DiaryService', () => {
     mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kcal', water: 'l', weight: 'kg', height: 'cm' });
     mockUnitsService.convertEnergy.mockImplementation((kcal: number) => Math.round(kcal));
     mockAchievementsService.evaluateForDiary.mockResolvedValue([]);
-    mockScoringService.processMealScoringEvent.mockResolvedValue(undefined);
+    mockScoringService.processMealScoringEvent.mockResolvedValue([]);
   });
 
   it('should be defined', () => {

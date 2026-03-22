@@ -37,6 +37,11 @@ function serializeTournament(tournament: any) {
         )
       : undefined,
     scoringRules: tournament.scoringRules,
+    scoreLimit: {
+      enabled: tournament.scoreLimitEnabled,
+      maxPoints: tournament.scoreLimitMaxPts,
+      period: tournament.scoreLimitPeriod?.toLowerCase(),
+    },
   };
 }
 
@@ -167,6 +172,9 @@ export class TournamentsService {
     if (dto.title !== undefined) updateData.title = dto.title;
     if (dto.description !== undefined) updateData.description = dto.description;
     if (dto.bannerUri !== undefined) updateData.bannerUri = dto.bannerUri;
+    if (dto.scoreLimitEnabled !== undefined) updateData.scoreLimitEnabled = dto.scoreLimitEnabled;
+    if (dto.scoreLimitMaxPts !== undefined) updateData.scoreLimitMaxPts = dto.scoreLimitMaxPts;
+    if (dto.scoreLimitPeriod !== undefined) updateData.scoreLimitPeriod = dto.scoreLimitPeriod;
 
     if (dto.scoringRules && dto.scoringRules.length > 0) {
       for (const rule of dto.scoringRules) {

@@ -1,3 +1,16 @@
+export const ScoreLimitPeriod = {
+  DAY: 'DAY',
+  WEEK: 'WEEK',
+  MONTH: 'MONTH',
+} as const;
+export type ScoreLimitPeriod = (typeof ScoreLimitPeriod)[keyof typeof ScoreLimitPeriod];
+
+export interface ScoringResult {
+  tournamentId: string;
+  points: number;
+  limitReached: boolean;
+}
+
 export const TournamentStatus = {
   UPCOMING: 'UPCOMING',
   ACTIVE: 'ACTIVE',

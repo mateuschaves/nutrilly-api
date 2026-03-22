@@ -126,6 +126,8 @@ export class DiaryService {
 
     // Fire tournament scoring events for selected tournaments
     const tournamentIds = dto.tournamentIds ?? [];
+    const scoringResultsMap = new Map<string, { points: number; limitReached: boolean }>();
+
     if (tournamentIds.length > 0) {
       const now = new Date();
       const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -139,14 +141,37 @@ export class DiaryService {
         time,
       };
 
-      await this.scoring.processMealScoringEvent(userId, { type: 'MEAL_LOGGED', payload }, tournamentIds);
+      const mealResults = await this.scoring.processMealScoringEvent(userId, { type: 'MEAL_LOGGED', payload }, tournamentIds);
+      for (const r of mealResults) {
+        scoringResultsMap.set(r.tournamentId, { points: r.points, limitReached: r.limitReached });
+      }
 
       if (isHealthyMeal(entry.kcal, entry.proteinG, entry.carbsG, entry.fatG)) {
-        await this.scoring.processMealScoringEvent(userId, { type: 'HEALTHY_MEAL', payload }, tournamentIds);
+        const healthyResults = await this.scoring.processMealScoringEvent(userId, { type: 'HEALTHY_MEAL', payload }, tournamentIds);
+        for (const r of healthyResults) {
+          const existing = scoringResultsMap.get(r.tournamentId);
+          scoringResultsMap.set(r.tournamentId, {
+            points: (existing?.points ?? 0) + r.points,
+            limitReached: r.limitReached || (existing?.limitReached ?? false),
+          });
+        }
       } else if (entry.kcal > 800) {
-        await this.scoring.processMealScoringEvent(userId, { type: 'UNHEALTHY_MEAL', payload }, tournamentIds);
+        const unhealthyResults = await this.scoring.processMealScoringEvent(userId, { type: 'UNHEALTHY_MEAL', payload }, tournamentIds);
+        for (const r of unhealthyResults) {
+          const existing = scoringResultsMap.get(r.tournamentId);
+          scoringResultsMap.set(r.tournamentId, {
+            points: (existing?.points ?? 0) + r.points,
+            limitReached: r.limitReached || (existing?.limitReached ?? false),
+          });
+        }
       }
     }
+
+    const scoringResults = Array.from(scoringResultsMap.entries()).map(([tournamentId, data]) => ({
+      tournamentId,
+      points: data.points,
+      limitReached: data.limitReached,
+    }));
 
     return {
       id: entry.id,
@@ -161,6 +186,7 @@ export class DiaryService {
       photoUri: entry.photoUri,
       quality: classifyEntry(entry.kcal, entry.proteinG, entry.carbsG, entry.fatG),
       newAchievements,
+      scoringResults,
     };
   }
 

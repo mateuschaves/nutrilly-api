@@ -18,9 +18,12 @@ const makeRule = (type: string, points: number, enabled = true) => ({
   emoji: '🏆',
 });
 
-const makeTournament = (scoringRules: any[]) => ({
+const makeTournament = (scoringRules: any[], scoreLimit?: { enabled: boolean; maxPts: number; period: string }) => ({
   id: T_ID,
   scoringRules,
+  scoreLimitEnabled: scoreLimit?.enabled ?? false,
+  scoreLimitMaxPts: scoreLimit?.maxPts ?? 200,
+  scoreLimitPeriod: scoreLimit?.period ?? 'DAY',
   members: [{ id: 'm-1', userId: USER_ID, tournamentId: T_ID, points: 0, joinedAt: new Date() }],
 });
 
@@ -32,6 +35,7 @@ describe('TournamentScoringService', () => {
     tournamentActivity: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      aggregate: jest.fn(),
     },
     tournamentMember: {
       findMany: jest.fn(),
@@ -52,6 +56,7 @@ describe('TournamentScoringService', () => {
     jest.clearAllMocks();
 
     mockPrisma.tournamentActivity.create.mockResolvedValue({});
+    mockPrisma.tournamentActivity.aggregate.mockResolvedValue({ _sum: { points: 0 } });
     mockPrisma.tournamentMember.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.tournamentMember.update.mockResolvedValue({});
     mockPrisma.tournamentMember.findMany.mockResolvedValue([]);
@@ -210,6 +215,103 @@ describe('TournamentScoringService', () => {
       await service.processScoringEvent(USER_ID, { type: 'DAILY_GOAL_MET', payload: { date: DATE } });
 
       expect(mockPrisma.tournamentActivity.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── score limit ────────────────────────────────────────────────────────────
+
+  describe('score limit (processMealScoringEvent)', () => {
+    const mealPayload = {
+      kcal: 300, proteinG: 25, carbsG: 30, fatG: 8,
+      mealName: 'Chicken Bowl', date: DATE, time: '12:30',
+    };
+
+    it('awards points normally when limit is disabled', async () => {
+      mockPrisma.tournament.findMany.mockResolvedValue([
+        makeTournament([makeRule('MEAL_LOGGED', 10)], { enabled: false, maxPts: 50, period: 'DAY' }),
+      ]);
+
+      const results = await service.processMealScoringEvent(USER_ID, { type: 'MEAL_LOGGED', payload: mealPayload }, [T_ID]);
+
+      expect(results).toEqual([{ tournamentId: T_ID, points: 10, limitReached: false }]);
+      expect(mockPrisma.tournamentActivity.create).toHaveBeenCalled();
+    });
+
+    it('awards points when limit is enabled but not yet reached', async () => {
+      mockPrisma.tournament.findMany.mockResolvedValue([
+        makeTournament([makeRule('MEAL_LOGGED', 10)], { enabled: true, maxPts: 100, period: 'DAY' }),
+      ]);
+      mockPrisma.tournamentActivity.aggregate.mockResolvedValue({ _sum: { points: 50 } });
+
+      const results = await service.processMealScoringEvent(USER_ID, { type: 'MEAL_LOGGED', payload: mealPayload }, [T_ID]);
+
+      expect(results).toEqual([{ tournamentId: T_ID, points: 10, limitReached: false }]);
+      expect(mockPrisma.tournamentActivity.create).toHaveBeenCalled();
+    });
+
+    it('blocks points and returns limitReached when limit is reached', async () => {
+      mockPrisma.tournament.findMany.mockResolvedValue([
+        makeTournament([makeRule('MEAL_LOGGED', 10)], { enabled: true, maxPts: 50, period: 'DAY' }),
+      ]);
+      mockPrisma.tournamentActivity.aggregate.mockResolvedValue({ _sum: { points: 50 } });
+
+      const results = await service.processMealScoringEvent(USER_ID, { type: 'MEAL_LOGGED', payload: mealPayload }, [T_ID]);
+
+      expect(results).toEqual([{ tournamentId: T_ID, points: 0, limitReached: true }]);
+      expect(mockPrisma.tournamentActivity.create).not.toHaveBeenCalled();
+      expect(mockPrisma.tournamentMember.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not block negative points (UNHEALTHY_MEAL) when limit is enabled', async () => {
+      mockPrisma.tournament.findMany.mockResolvedValue([
+        makeTournament([makeRule('UNHEALTHY_MEAL', -10)], { enabled: true, maxPts: 50, period: 'DAY' }),
+      ]);
+      mockPrisma.tournamentActivity.aggregate.mockResolvedValue({ _sum: { points: 50 } });
+
+      const results = await service.processMealScoringEvent(USER_ID, { type: 'UNHEALTHY_MEAL', payload: mealPayload }, [T_ID]);
+
+      // Negative points bypass limit check (pointsToAdd <= 0 skips limit)
+      expect(results).toEqual([{ tournamentId: T_ID, points: -10, limitReached: false }]);
+      expect(mockPrisma.tournamentActivity.create).toHaveBeenCalled();
+    });
+
+    it('returns empty array when tournamentIds is empty', async () => {
+      const results = await service.processMealScoringEvent(USER_ID, { type: 'MEAL_LOGGED', payload: mealPayload }, []);
+      expect(results).toEqual([]);
+    });
+  });
+
+  describe('score limit (processScoringEvent)', () => {
+    it('blocks DAILY_GOAL_MET when limit is reached', async () => {
+      mockPrisma.tournament.findMany.mockResolvedValue([
+        makeTournament([makeRule('DAILY_GOAL_MET', 50)], { enabled: true, maxPts: 100, period: 'DAY' }),
+      ]);
+      mockPrisma.tournamentActivity.findFirst.mockResolvedValue(null);
+      mockPrisma.tournamentActivity.aggregate.mockResolvedValue({ _sum: { points: 100 } });
+
+      const results = await service.processScoringEvent(USER_ID, { type: 'DAILY_GOAL_MET', payload: { date: DATE } });
+
+      expect(results).toEqual([{ tournamentId: T_ID, points: 0, limitReached: true }]);
+      expect(mockPrisma.tournamentActivity.create).not.toHaveBeenCalled();
+    });
+
+    it('returns scoring results for processScoringEvent', async () => {
+      mockPrisma.tournament.findMany.mockResolvedValue([
+        makeTournament([makeRule('DAILY_GOAL_MET', 50)]),
+      ]);
+      mockPrisma.tournamentActivity.findFirst.mockResolvedValue(null);
+
+      const results = await service.processScoringEvent(USER_ID, { type: 'DAILY_GOAL_MET', payload: { date: DATE } });
+
+      expect(results).toEqual([{ tournamentId: T_ID, points: 50, limitReached: false }]);
+    });
+
+    it('returns empty array when user has no active tournaments', async () => {
+      mockPrisma.tournament.findMany.mockResolvedValue([]);
+
+      const results = await service.processScoringEvent(USER_ID, { type: 'DAILY_GOAL_MET', payload: { date: DATE } });
+
+      expect(results).toEqual([]);
     });
   });
 
