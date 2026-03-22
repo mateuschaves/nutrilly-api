@@ -2,9 +2,11 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
 import { AchievementsService } from '../achievements/achievements.service';
+import { TournamentScoringService } from '../tournaments/scoring/scoring.service';
 import { CreateDiaryEntryDto } from './dto/create-diary-entry.dto';
 import { EnergyUnit } from '../units/units.types';
 import { EntryQuality } from './diary.types';
+import { isHealthyMeal } from '../tournaments/scoring/scoring.helpers';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -47,6 +49,7 @@ export class DiaryService {
     private prisma: PrismaService,
     private unitsService: UnitsService,
     private achievements: AchievementsService,
+    private scoring: TournamentScoringService,
   ) {}
 
   async getByDate(userId: string, date: string) {
@@ -120,6 +123,30 @@ export class DiaryService {
     const energyUnitLabel = energyUnit === 'kj' ? 'kJ' : 'kcal';
 
     const newAchievements = await this.achievements.evaluateForDiary(userId);
+
+    // Fire tournament scoring events for selected tournaments
+    const tournamentIds = dto.tournamentIds ?? [];
+    if (tournamentIds.length > 0) {
+      const now = new Date();
+      const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      const payload = {
+        kcal: entry.kcal,
+        proteinG: entry.proteinG,
+        carbsG: entry.carbsG,
+        fatG: entry.fatG,
+        mealName: entry.name,
+        date,
+        time,
+      };
+
+      await this.scoring.processMealScoringEvent(userId, { type: 'MEAL_LOGGED', payload }, tournamentIds);
+
+      if (isHealthyMeal(entry.kcal, entry.proteinG, entry.carbsG, entry.fatG)) {
+        await this.scoring.processMealScoringEvent(userId, { type: 'HEALTHY_MEAL', payload }, tournamentIds);
+      } else if (entry.kcal > 800) {
+        await this.scoring.processMealScoringEvent(userId, { type: 'UNHEALTHY_MEAL', payload }, tournamentIds);
+      }
+    }
 
     return {
       id: entry.id,

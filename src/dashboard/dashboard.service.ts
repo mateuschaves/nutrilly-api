@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
+import { TournamentScoringService } from '../tournaments/scoring/scoring.service';
 import { EnergyUnit, WaterUnit } from '../units/units.types';
 import { computeStreak } from './streak.utils';
 
@@ -11,6 +12,7 @@ export class DashboardService {
   constructor(
     private prisma: PrismaService,
     private unitsService: UnitsService,
+    private scoring: TournamentScoringService,
   ) {}
 
   async getDailySummary(userId: string, date: string) {
@@ -50,6 +52,14 @@ export class DashboardService {
       : 0;
 
     const streak = await this.computeStreak(userId, date);
+
+    // Fire tournament scoring for daily goals if met
+    if (caloriesGoal > 0 && totalKcal >= caloriesGoal) {
+      await this.scoring.processScoringEvent(userId, { type: 'DAILY_GOAL_MET', payload: { date } });
+    }
+    if (waterGoalMl > 0 && totalWaterMl >= waterGoalMl) {
+      await this.scoring.processScoringEvent(userId, { type: 'WATER_GOAL_MET', payload: { date } });
+    }
 
     return {
       calories: {

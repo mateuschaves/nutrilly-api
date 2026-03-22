@@ -4,6 +4,7 @@ import { DiaryService } from './diary.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
 import { AchievementsService } from '../achievements/achievements.service';
+import { TournamentScoringService } from '../tournaments/scoring/scoring.service';
 import { EntryQuality } from './diary.types';
 
 const USER_ID = 'user-1';
@@ -32,6 +33,10 @@ describe('DiaryService', () => {
     evaluateForDiary: jest.fn(),
   };
 
+  const mockScoringService = {
+    processMealScoringEvent: jest.fn().mockResolvedValue(undefined),
+  };
+
   // A minimal diary entry returned by Prisma after create
   const makeCreatedEntry = (overrides = {}) => ({
     id: 'entry-new',
@@ -53,6 +58,7 @@ describe('DiaryService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: UnitsService, useValue: mockUnitsService },
         { provide: AchievementsService, useValue: mockAchievementsService },
+        { provide: TournamentScoringService, useValue: mockScoringService },
       ],
     }).compile();
 
@@ -63,6 +69,7 @@ describe('DiaryService', () => {
     mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kcal', water: 'l', weight: 'kg', height: 'cm' });
     mockUnitsService.convertEnergy.mockImplementation((kcal: number) => Math.round(kcal));
     mockAchievementsService.evaluateForDiary.mockResolvedValue([]);
+    mockScoringService.processMealScoringEvent.mockResolvedValue(undefined);
   });
 
   it('should be defined', () => {
@@ -531,6 +538,73 @@ describe('DiaryService', () => {
 
       expect(result.newAchievements).toHaveLength(2);
       expect(result.newAchievements.map((a) => a.key)).toEqual(['FIRST_LOG', 'EARLY_BIRD']);
+    });
+
+    it('should NOT call processMealScoringEvent when tournamentIds is empty', async () => {
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry());
+
+      await service.addEntry(USER_ID, DATE, MEAL_ID, { ...dto, tournamentIds: [] });
+
+      expect(mockScoringService.processMealScoringEvent).not.toHaveBeenCalled();
+    });
+
+    it('should NOT call processMealScoringEvent when tournamentIds is omitted', async () => {
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry());
+
+      await service.addEntry(USER_ID, DATE, MEAL_ID, dto);
+
+      expect(mockScoringService.processMealScoringEvent).not.toHaveBeenCalled();
+    });
+
+    it('should call processMealScoringEvent with MEAL_LOGGED when tournamentIds provided', async () => {
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry({ kcal: 240, proteinG: 8, carbsG: 44, fatG: 5 }));
+
+      await service.addEntry(USER_ID, DATE, MEAL_ID, { ...dto, tournamentIds: ['t-1'] });
+
+      expect(mockScoringService.processMealScoringEvent).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({ type: 'MEAL_LOGGED' }),
+        ['t-1'],
+      );
+    });
+
+    it('should call processMealScoringEvent with HEALTHY_MEAL for a balanced meal < 600kcal', async () => {
+      // protein 30g=120kcal(44%), fat 3g=27kcal(10%), carbs 30g — qualifies as healthy
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry({ kcal: 267, proteinG: 30, carbsG: 30, fatG: 3 }));
+
+      await service.addEntry(USER_ID, DATE, MEAL_ID, { ...dto, tournamentIds: ['t-1'] });
+
+      const calls = mockScoringService.processMealScoringEvent.mock.calls.map((c: any[]) => c[1].type);
+      expect(calls).toContain('MEAL_LOGGED');
+      expect(calls).toContain('HEALTHY_MEAL');
+    });
+
+    it('should call processMealScoringEvent with UNHEALTHY_MEAL for a meal > 800kcal', async () => {
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry({ kcal: 900, proteinG: 10, carbsG: 80, fatG: 30 }));
+
+      await service.addEntry(USER_ID, DATE, MEAL_ID, { ...dto, tournamentIds: ['t-1'] });
+
+      const calls = mockScoringService.processMealScoringEvent.mock.calls.map((c: any[]) => c[1].type);
+      expect(calls).toContain('MEAL_LOGGED');
+      expect(calls).toContain('UNHEALTHY_MEAL');
+    });
+
+    it('should NOT call HEALTHY_MEAL and UNHEALTHY_MEAL for a mid-range meal', async () => {
+      // 500kcal, poor macros → not healthy, not > 800kcal
+      mockPrisma.meal.findFirst.mockResolvedValue({ id: MEAL_ID });
+      mockPrisma.diaryEntry.create.mockResolvedValue(makeCreatedEntry({ kcal: 500, proteinG: 10, carbsG: 60, fatG: 15 }));
+
+      await service.addEntry(USER_ID, DATE, MEAL_ID, { ...dto, tournamentIds: ['t-1'] });
+
+      const calls = mockScoringService.processMealScoringEvent.mock.calls.map((c: any[]) => c[1].type);
+      expect(calls).toContain('MEAL_LOGGED');
+      expect(calls).not.toContain('HEALTHY_MEAL');
+      expect(calls).not.toContain('UNHEALTHY_MEAL');
     });
   });
 

@@ -5,14 +5,16 @@ import { ACHIEVEMENTS } from './achievements.constants';
 
 const USER_ID = 'user-test-1';
 
-/** Generate N consecutive diary-date rows ending at endDate (descending) */
-function makeDates(endDate: string, count: number): { date: string }[] {
-  const result: { date: string }[] = [];
+/** Generate N consecutive diary-date rows ending at endDate (descending).
+ *  Includes loggedAt at 12:00 UTC so EARLY_BIRD and NIGHT_OWL are not triggered. */
+function makeDates(endDate: string, count: number): { date: string; loggedAt: Date }[] {
+  const result: { date: string; loggedAt: Date }[] = [];
   const end = new Date(endDate + 'T00:00:00Z');
   for (let i = 0; i < count; i++) {
     const d = new Date(end);
     d.setUTCDate(end.getUTCDate() - i);
-    result.push({ date: d.toISOString().split('T')[0] });
+    const dateStr = d.toISOString().split('T')[0];
+    result.push({ date: dateStr, loggedAt: new Date(dateStr + 'T12:00:00Z') });
   }
   return result; // descending
 }
@@ -184,13 +186,17 @@ describe('AchievementsService', () => {
   // ─── No duplicate achievements ──────────────────────────────────────────────
 
   describe('no duplicate achievements', () => {
-    it('should always call createMany with skipDuplicates: true', async () => {
+    it('should call createMany with the new achievement keys when achievements are unlocked', async () => {
       mockPrisma.diaryEntry.count.mockResolvedValue(1);
 
       await service.evaluateAll(USER_ID);
 
       expect(mockPrisma.userAchievement.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({ skipDuplicates: true }),
+        expect.objectContaining({
+          data: expect.arrayContaining([
+            expect.objectContaining({ userId: USER_ID, achievementKey: 'FIRST_LOG' }),
+          ]),
+        }),
       );
     });
 
@@ -209,13 +215,9 @@ describe('AchievementsService', () => {
 
       await service.evaluateAll(USER_ID);
 
-      // createMany IS called (to grant FIRST_LOG again) but with skipDuplicates: true
-      // so no actual duplicate is inserted
-      if (mockPrisma.userAchievement.createMany.mock.calls.length > 0) {
-        expect(mockPrisma.userAchievement.createMany).toHaveBeenCalledWith(
-          expect.objectContaining({ skipDuplicates: true }),
-        );
-      }
+      // The service filters out already-earned achievements before calling createMany,
+      // so createMany should NOT be called when all earned keys are already in the DB.
+      expect(mockPrisma.userAchievement.createMany).not.toHaveBeenCalled();
     });
 
     it('should preserve original earnedAt from DB for already-earned achievements', async () => {
@@ -261,7 +263,6 @@ describe('AchievementsService', () => {
           data: expect.arrayContaining([
             expect.objectContaining({ userId: USER_ID, achievementKey: 'FIRST_LOG' }),
           ]),
-          skipDuplicates: true,
         }),
       );
     });
@@ -408,7 +409,6 @@ describe('AchievementsService', () => {
           data: expect.arrayContaining([
             expect.objectContaining({ userId: USER_ID, achievementKey: 'HYDRATION_HERO' }),
           ]),
-          skipDuplicates: true,
         }),
       );
     });
@@ -729,19 +729,28 @@ describe('AchievementsService', () => {
 
   describe('EARLY_BIRD', () => {
     it('should be granted when at least 1 meal was logged before 8am UTC', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(1) }]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([{ loggedAt: new Date('2026-03-19T06:00:00Z') }]);
       const result = await service['checkEarlyBird'](USER_ID);
       expect(result).toContain('EARLY_BIRD');
     });
 
     it('should be granted when multiple meals were logged before 8am', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(5) }]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T05:00:00Z') },
+        { loggedAt: new Date('2026-03-20T07:30:00Z') },
+        { loggedAt: new Date('2026-03-21T06:45:00Z') },
+        { loggedAt: new Date('2026-03-22T04:00:00Z') },
+        { loggedAt: new Date('2026-03-23T07:59:00Z') },
+      ]);
       const result = await service['checkEarlyBird'](USER_ID);
       expect(result).toContain('EARLY_BIRD');
     });
 
     it('should not be granted when no meal was logged before 8am', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T09:00:00Z') },
+        { loggedAt: new Date('2026-03-20T12:00:00Z') },
+      ]);
       const result = await service['checkEarlyBird'](USER_ID);
       expect(result).not.toContain('EARLY_BIRD');
     });
@@ -779,25 +788,44 @@ describe('AchievementsService', () => {
 
   describe('NIGHT_OWL', () => {
     it('should be granted when exactly 3 meals were logged after 9pm', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(3) }]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T21:00:00Z') },
+        { loggedAt: new Date('2026-03-20T22:30:00Z') },
+        { loggedAt: new Date('2026-03-21T23:00:00Z') },
+      ]);
       const result = await service['checkNightOwl'](USER_ID);
       expect(result).toContain('NIGHT_OWL');
     });
 
     it('should be granted when more than 3 meals were logged after 9pm', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(7) }]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T21:00:00Z') },
+        { loggedAt: new Date('2026-03-20T22:00:00Z') },
+        { loggedAt: new Date('2026-03-21T23:00:00Z') },
+        { loggedAt: new Date('2026-03-22T21:30:00Z') },
+        { loggedAt: new Date('2026-03-23T22:45:00Z') },
+        { loggedAt: new Date('2026-03-24T23:59:00Z') },
+        { loggedAt: new Date('2026-03-25T21:01:00Z') },
+      ]);
       const result = await service['checkNightOwl'](USER_ID);
       expect(result).toContain('NIGHT_OWL');
     });
 
     it('should not be granted when only 2 meals were logged after 9pm', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(2) }]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T21:00:00Z') },
+        { loggedAt: new Date('2026-03-20T22:00:00Z') },
+        { loggedAt: new Date('2026-03-21T19:00:00Z') }, // 19:00 UTC — does not qualify
+      ]);
       const result = await service['checkNightOwl'](USER_ID);
       expect(result).not.toContain('NIGHT_OWL');
     });
 
     it('should not be granted when no meal was logged after 9pm', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T12:00:00Z') },
+        { loggedAt: new Date('2026-03-20T15:00:00Z') },
+      ]);
       const result = await service['checkNightOwl'](USER_ID);
       expect(result).not.toContain('NIGHT_OWL');
     });
@@ -916,7 +944,6 @@ describe('AchievementsService', () => {
           data: expect.arrayContaining([
             expect.objectContaining({ userId: USER_ID, achievementKey: 'WATER_WEEK' }),
           ]),
-          skipDuplicates: true,
         }),
       );
     });
@@ -967,20 +994,30 @@ describe('AchievementsService', () => {
       expect(result).not.toContain('TRIPLE_CROWN');
     });
 
-    it('checkEarlyBird: should handle BigInt(0) correctly as falsy count', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
+    it('checkEarlyBird: should not grant when no entry has loggedAt before 8am', async () => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T09:00:00Z') },
+      ]);
       const result = await service['checkEarlyBird'](USER_ID);
       expect(result).not.toContain('EARLY_BIRD');
     });
 
-    it('checkNightOwl: should handle count exactly at threshold (BigInt(3))', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(3) }]);
+    it('checkNightOwl: should grant when exactly 3 entries have loggedAt >= 21:00 UTC', async () => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T21:00:00Z') },
+        { loggedAt: new Date('2026-03-20T22:00:00Z') },
+        { loggedAt: new Date('2026-03-21T23:00:00Z') },
+      ]);
       const result = await service['checkNightOwl'](USER_ID);
       expect(result).toContain('NIGHT_OWL');
     });
 
-    it('checkNightOwl: should not grant when count is BigInt(2)', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([{ count: BigInt(2) }]);
+    it('checkNightOwl: should not grant when only 2 entries have loggedAt >= 21:00 UTC', async () => {
+      mockPrisma.diaryEntry.findMany.mockResolvedValue([
+        { loggedAt: new Date('2026-03-19T21:00:00Z') },
+        { loggedAt: new Date('2026-03-20T22:00:00Z') },
+        { loggedAt: new Date('2026-03-21T19:00:00Z') }, // 19:00 UTC — does not qualify
+      ]);
       const result = await service['checkNightOwl'](USER_ID);
       expect(result).not.toContain('NIGHT_OWL');
     });

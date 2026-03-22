@@ -1,4 +1,4 @@
-import { IsString, IsInt, IsNumber, IsNotEmpty, IsOptional, Min } from 'class-validator';
+import { IsString, IsInt, IsNumber, IsNotEmpty, IsOptional, Min, IsArray } from 'class-validator';
 
 export class CreateDiaryEntryDto {
   @IsString()
@@ -28,4 +28,13 @@ export class CreateDiaryEntryDto {
   @IsOptional()
   @IsString()
   photoUri?: string;
+
+  /**
+   * IDs of active tournaments where this meal should score points.
+   * Omit or send empty array to log without scoring in any tournament.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tournamentIds?: string[];
 }
