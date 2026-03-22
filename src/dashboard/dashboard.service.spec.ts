@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitsService } from '../units/units.service';
+import { TournamentScoringService } from '../tournaments/scoring/scoring.service';
 
 describe('DashboardService', () => {
   let service: DashboardService;
@@ -25,12 +26,17 @@ describe('DashboardService', () => {
     ),
   };
 
+  const mockScoringService = {
+    processScoringEvent: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DashboardService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: UnitsService, useValue: mockUnitsService },
+        { provide: TournamentScoringService, useValue: mockScoringService },
       ],
     }).compile();
 
@@ -38,6 +44,7 @@ describe('DashboardService', () => {
     jest.clearAllMocks();
 
     // Reset to default implementations after clearAllMocks
+    mockScoringService.processScoringEvent.mockResolvedValue(undefined);
     mockUnitsService.getUserUnits.mockResolvedValue({ energy: 'kcal', water: 'l', weight: 'kg', height: 'cm' });
     mockUnitsService.convertEnergy.mockImplementation((kcal: number, unit: string) =>
       unit === 'kj' ? Math.round(kcal * 4.184) : Math.round(kcal),

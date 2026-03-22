@@ -25,7 +25,9 @@ export function calculatePoints(
       const p = payload as WeightLossPayload;
       const lostKg = p.previousWeightKg - p.weightKg;
       if (lostKg <= 0) return 0;
-      const units = Math.floor(lostKg / 0.1);
+      // Use integer math (×100 then round) to avoid floating-point drift.
+      // e.g. 80 - 79.9 = 0.09999... → ×100 = 9.999... → round = 10 → ÷10 = 1 unit
+      const units = Math.floor(Math.round(lostKg * 100) / 10);
       return units * rule.points;
     }
     default:
