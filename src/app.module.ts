@@ -13,6 +13,7 @@ import { WeightModule } from './weight/weight.module';
 import { R2Module } from './r2/r2.module';
 import { AchievementsModule } from './achievements/achievements.module';
 import { TournamentsModule } from './tournaments/tournaments.module';
+import { DevicesModule } from './devices/devices.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { TournamentsModule } from './tournaments/tournaments.module';
     WeightModule,
     R2Module,
     TournamentsModule,
+    DevicesModule,
   ],
 })
 export class AppModule {}
