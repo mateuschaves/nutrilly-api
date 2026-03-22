@@ -1,5 +1,35 @@
 import { TournamentScoringRule } from '@prisma/client';
-import { MealScoringPayload, DailyGoalPayload, CaloriesBurnedPayload, WeightLossPayload } from '../tournaments.types';
+import { MealScoringPayload, DailyGoalPayload, CaloriesBurnedPayload, WeightLossPayload, ScoreLimitPeriod } from '../tournaments.types';
+
+export function getPeriodWindow(period: string): { start: Date; end: Date } {
+  const now = new Date();
+
+  if (period === ScoreLimitPeriod.DAY) {
+    const start = new Date(now);
+    start.setUTCHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setUTCHours(23, 59, 59, 999);
+    return { start, end };
+  }
+
+  if (period === ScoreLimitPeriod.WEEK) {
+    // Week starts on Monday (ISO 8601)
+    const day = now.getUTCDay(); // 0 = Sunday
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const start = new Date(now);
+    start.setUTCDate(now.getUTCDate() + diffToMonday);
+    start.setUTCHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    end.setUTCHours(23, 59, 59, 999);
+    return { start, end };
+  }
+
+  // MONTH
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+  return { start, end };
+}
 
 export function getCurrentTime(): string {
   const now = new Date();

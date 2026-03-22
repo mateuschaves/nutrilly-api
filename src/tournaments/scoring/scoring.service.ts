@@ -7,12 +7,51 @@ import {
   DailyGoalPayload,
   WeightLossPayload,
   CaloriesBurnedPayload,
+  ScoringResult,
 } from '../tournaments.types';
-import { calculatePoints, getCurrentTime } from './scoring.helpers';
+import { calculatePoints, getCurrentTime, getPeriodWindow } from './scoring.helpers';
 
 @Injectable()
 export class TournamentScoringService {
   constructor(private prisma: PrismaService) {}
+
+  private async getPointsInPeriod(
+    tournamentId: string,
+    userId: string,
+    period: string,
+  ): Promise<number> {
+    const { start, end } = getPeriodWindow(period);
+
+    const result = await this.prisma.tournamentActivity.aggregate({
+      where: {
+        tournamentId,
+        userId,
+        points: { gt: 0 },
+        createdAt: { gte: start, lte: end },
+      },
+      _sum: { points: true },
+    });
+
+    return result._sum.points ?? 0;
+  }
+
+  private async checkScoreLimit(
+    tournament: any,
+    userId: string,
+    pointsToAdd: number,
+  ): Promise<{ allowed: boolean; effectivePoints: number }> {
+    if (!tournament.scoreLimitEnabled || pointsToAdd <= 0) {
+      return { allowed: true, effectivePoints: pointsToAdd };
+    }
+
+    const accumulated = await this.getPointsInPeriod(tournament.id, userId, tournament.scoreLimitPeriod);
+
+    if (accumulated >= tournament.scoreLimitMaxPts) {
+      return { allowed: false, effectivePoints: 0 };
+    }
+
+    return { allowed: true, effectivePoints: pointsToAdd };
+  }
 
   /**
    * Process a meal-related scoring event only for the tournaments the user
@@ -22,8 +61,8 @@ export class TournamentScoringService {
     userId: string,
     event: MealScoringEvent,
     tournamentIds: string[],
-  ): Promise<void> {
-    if (!tournamentIds.length) return;
+  ): Promise<ScoringResult[]> {
+    if (!tournamentIds.length) return [];
 
     const tournaments = await this.prisma.tournament.findMany({
       where: {
@@ -34,11 +73,20 @@ export class TournamentScoringService {
       include: { scoringRules: true },
     });
 
+    const results: ScoringResult[] = [];
+
     for (const tournament of tournaments) {
       const rule = tournament.scoringRules.find((r) => r.type === event.type && r.enabled);
       if (!rule) continue;
 
       const points = calculatePoints(rule, event.payload);
+      const { allowed, effectivePoints } = await this.checkScoreLimit(tournament, userId, points);
+
+      if (!allowed) {
+        results.push({ tournamentId: tournament.id, points: 0, limitReached: true });
+        continue;
+      }
+
       const payload = event.payload as MealScoringPayload;
 
       await this.prisma.tournamentActivity.create({
@@ -47,7 +95,7 @@ export class TournamentScoringService {
           userId,
           type: event.type,
           label: rule.label,
-          points,
+          points: effectivePoints,
           emoji: rule.emoji,
           date: payload.date,
           time: payload.time,
@@ -61,22 +109,27 @@ export class TournamentScoringService {
 
       await this.prisma.tournamentMember.updateMany({
         where: { tournamentId: tournament.id, userId },
-        data: { points: { increment: points } },
+        data: { points: { increment: effectivePoints } },
       });
 
       await this.recalculatePositions(tournament.id);
+      results.push({ tournamentId: tournament.id, points: effectivePoints, limitReached: false });
     }
+
+    return results;
   }
 
   /**
    * Process an automatic scoring event (daily goals, water, weight, calories burned)
    * for all active tournaments the user belongs to.
    */
-  async processScoringEvent(userId: string, event: ScoringEvent): Promise<void> {
+  async processScoringEvent(userId: string, event: ScoringEvent): Promise<ScoringResult[]> {
     const tournaments = await this.prisma.tournament.findMany({
       where: { status: 'ACTIVE', members: { some: { userId } } },
       include: { scoringRules: true },
     });
+
+    const results: ScoringResult[] = [];
 
     for (const tournament of tournaments) {
       const rule = tournament.scoringRules.find((r) => r.type === event.type && r.enabled);
@@ -98,6 +151,13 @@ export class TournamentScoringService {
       const points = calculatePoints(rule, event.payload);
       if (points === 0) continue;
 
+      const { allowed, effectivePoints } = await this.checkScoreLimit(tournament, userId, points);
+
+      if (!allowed) {
+        results.push({ tournamentId: tournament.id, points: 0, limitReached: true });
+        continue;
+      }
+
       const time = getCurrentTime();
 
       const activityData: any = {
@@ -105,7 +165,7 @@ export class TournamentScoringService {
         userId,
         type: event.type,
         label: rule.label,
-        points,
+        points: effectivePoints,
         emoji: rule.emoji,
         date,
         time,
@@ -123,11 +183,14 @@ export class TournamentScoringService {
 
       await this.prisma.tournamentMember.updateMany({
         where: { tournamentId: tournament.id, userId },
-        data: { points: { increment: points } },
+        data: { points: { increment: effectivePoints } },
       });
 
       await this.recalculatePositions(tournament.id);
+      results.push({ tournamentId: tournament.id, points: effectivePoints, limitReached: false });
     }
+
+    return results;
   }
 
   async recalculatePositions(tournamentId: string): Promise<void> {

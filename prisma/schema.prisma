@@ -147,6 +147,10 @@ model Tournament {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  scoreLimitEnabled Boolean @default(false)
+  scoreLimitMaxPts  Int     @default(200)
+  scoreLimitPeriod  String  @default("DAY") // DAY | WEEK | MONTH
+
   members      TournamentMember[]
   activities   TournamentActivity[]
   scoringRules TournamentScoringRule[]

@@ -1,4 +1,4 @@
-import { calculatePoints, isHealthyMeal, getCurrentTime, getCurrentDate } from './scoring.helpers';
+import { calculatePoints, isHealthyMeal, getCurrentTime, getCurrentDate, getPeriodWindow } from './scoring.helpers';
 
 const makeRule = (type: string, points: number) =>
   ({ id: 'r-1', tournamentId: 't-1', type, points, label: '', description: '', enabled: true, unit: null, emoji: '' }) as any;
@@ -112,6 +112,92 @@ describe('scoring.helpers', () => {
     it('returns true for a lean chicken + rice meal', () => {
       // 400kcal: protein 35g=140(45%), carbs 35g=140(45%), fat 5g=45(15%)
       expect(isHealthyMeal(400, 35, 35, 5)).toBe(true);
+    });
+  });
+
+  // ─── getPeriodWindow ────────────────────────────────────────────────────────
+
+  describe('getPeriodWindow', () => {
+    describe('DAY', () => {
+      it('returns start at 00:00:00.000 UTC and end at 23:59:59.999 UTC', () => {
+        const { start, end } = getPeriodWindow('DAY');
+        expect(start.getUTCHours()).toBe(0);
+        expect(start.getUTCMinutes()).toBe(0);
+        expect(start.getUTCSeconds()).toBe(0);
+        expect(start.getUTCMilliseconds()).toBe(0);
+        expect(end.getUTCHours()).toBe(23);
+        expect(end.getUTCMinutes()).toBe(59);
+        expect(end.getUTCSeconds()).toBe(59);
+        expect(end.getUTCMilliseconds()).toBe(999);
+        expect(start.getUTCFullYear()).toBe(end.getUTCFullYear());
+        expect(start.getUTCMonth()).toBe(end.getUTCMonth());
+        expect(start.getUTCDate()).toBe(end.getUTCDate());
+      });
+    });
+
+    describe('WEEK', () => {
+      it('returns a window spanning 7 days starting on Monday', () => {
+        // Use a fixed Wednesday to avoid flakiness
+        const wednesday = new Date('2026-03-25T10:00:00Z'); // Wednesday
+        jest.useFakeTimers({ now: wednesday.getTime() });
+        const { start, end } = getPeriodWindow('WEEK');
+        jest.useRealTimers();
+        // start must be Monday (UTC day = 1)
+        expect(start.getUTCDay()).toBe(1);
+        expect(start.getUTCDate()).toBe(23); // Mon March 23
+        // end must be Sunday (UTC day = 0)
+        expect(end.getUTCDay()).toBe(0);
+        expect(end.getUTCDate()).toBe(29); // Sun March 29
+      });
+
+      it('returns correct Monday when today is Sunday', () => {
+        // Mock a Sunday
+        const sunday = new Date('2026-03-22T12:00:00Z'); // Sunday
+        expect(sunday.getUTCDay()).toBe(0);
+        jest.useFakeTimers({ now: sunday.getTime() });
+        const { start } = getPeriodWindow('WEEK');
+        expect(start.getUTCDay()).toBe(1); // Monday
+        // Sunday March 22 → Monday should be March 16
+        expect(start.getUTCDate()).toBe(16);
+        expect(start.getUTCMonth()).toBe(2); // March = 2
+        jest.useRealTimers();
+      });
+
+      it('returns correct Monday when today is Monday', () => {
+        const monday = new Date('2026-03-23T08:00:00Z'); // Monday
+        expect(monday.getUTCDay()).toBe(1);
+        jest.useFakeTimers({ now: monday.getTime() });
+        const { start } = getPeriodWindow('WEEK');
+        expect(start.getUTCDay()).toBe(1);
+        expect(start.getUTCDate()).toBe(23);
+        jest.useRealTimers();
+      });
+    });
+
+    describe('MONTH', () => {
+      it('returns start on the 1st and end on the last day of the current month', () => {
+        const { start, end } = getPeriodWindow('MONTH');
+        expect(start.getUTCDate()).toBe(1);
+        expect(start.getUTCHours()).toBe(0);
+        // end should be the last day of the month
+        const lastDay = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0));
+        expect(end.getUTCDate()).toBe(lastDay.getUTCDate());
+        expect(end.getUTCHours()).toBe(23);
+        expect(end.getUTCMinutes()).toBe(59);
+        expect(end.getUTCSeconds()).toBe(59);
+        expect(end.getUTCMilliseconds()).toBe(999);
+      });
+
+      it('handles month boundary correctly for February', () => {
+        const feb = new Date('2026-02-15T12:00:00Z');
+        jest.useFakeTimers({ now: feb.getTime() });
+        const { start, end } = getPeriodWindow('MONTH');
+        expect(start.getUTCDate()).toBe(1);
+        expect(start.getUTCMonth()).toBe(1); // February
+        expect(end.getUTCDate()).toBe(28); // 2026 is not a leap year
+        expect(end.getUTCMonth()).toBe(1);
+        jest.useRealTimers();
+      });
     });
   });
 

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsInt, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt, IsArray, ValidateNested, IsIn, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -53,4 +53,20 @@ export class UpdateTournamentDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateScoringRuleDto)
   scoringRules?: UpdateScoringRuleDto[];
+
+  @ApiPropertyOptional({ example: true, description: 'Enable or disable the score limit for this tournament' })
+  @IsOptional()
+  @IsBoolean()
+  scoreLimitEnabled?: boolean;
+
+  @ApiPropertyOptional({ example: 200, description: 'Maximum points a member can earn per period (min: 1)' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  scoreLimitMaxPts?: number;
+
+  @ApiPropertyOptional({ example: 'DAY', enum: ['DAY', 'WEEK', 'MONTH'], description: 'Period for the score limit' })
+  @IsOptional()
+  @IsIn(['DAY', 'WEEK', 'MONTH'])
+  scoreLimitPeriod?: string;
 }
