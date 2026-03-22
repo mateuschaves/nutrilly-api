@@ -23,6 +23,7 @@ import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { JoinTournamentDto } from './dto/join-tournament.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
+import { TournamentResponseDto, TournamentMemberResponseDto } from './dto/tournament-response.dto';
 
 @ApiTags('tournaments')
 @ApiBearerAuth()
@@ -44,6 +45,7 @@ export class TournamentsController {
   @ApiResponse({
     status: 200,
     description: 'Array of tournaments (may be empty)',
+    type: [TournamentResponseDto],
   })
   findAll(@CurrentUser() user: CurrentUserPayload) {
     return this.tournamentsService.findAll(user.id);
@@ -57,7 +59,7 @@ export class TournamentsController {
       'Used by the frontend to populate the tournament selector on the meal-log screen. ' +
       'The user can then choose which of these tournaments should receive points for a given meal entry.',
   })
-  @ApiResponse({ status: 200, description: 'Array of active tournaments (may be empty)' })
+  @ApiResponse({ status: 200, description: 'Array of active tournaments (may be empty)', type: [TournamentResponseDto] })
   findActive(@CurrentUser() user: CurrentUserPayload) {
     return this.tournamentsService.findActive(user.id);
   }
@@ -70,7 +72,7 @@ export class TournamentsController {
       'and scoring rules. Only accessible to members of the tournament.',
   })
   @ApiParam({ name: 'id', description: 'Tournament ID (CUID)' })
-  @ApiResponse({ status: 200, description: 'Tournament detail' })
+  @ApiResponse({ status: 200, description: 'Tournament detail', type: TournamentResponseDto })
   @ApiResponse({ status: 403, description: 'You are not a member of this tournament' })
   @ApiResponse({ status: 404, description: 'Tournament not found' })
   findById(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
@@ -89,7 +91,7 @@ export class TournamentsController {
       'The `startDate` is required. Omitting `endDate` creates an open-ended tournament. ' +
       'Status transitions (UPCOMING → ACTIVE → ENDED) are managed automatically by the hourly cron job.',
   })
-  @ApiResponse({ status: 201, description: 'Tournament created with member + scoring rules' })
+  @ApiResponse({ status: 201, description: 'Tournament created with member + scoring rules', type: TournamentResponseDto })
   @ApiResponse({ status: 400, description: 'Validation error (missing required fields, invalid date)' })
   create(@CurrentUser() user: CurrentUserPayload, @Body() dto: CreateTournamentDto) {
     return this.tournamentsService.create(user.id, dto);
@@ -103,7 +105,7 @@ export class TournamentsController {
       'Validations: code must exist, tournament must not be ENDED, user must not already be a member. ' +
       'UPCOMING tournaments can be joined so the user is ready when the tournament becomes ACTIVE.',
   })
-  @ApiResponse({ status: 201, description: 'Joined successfully — returns full tournament detail' })
+  @ApiResponse({ status: 201, description: 'Joined successfully — returns full tournament detail', type: TournamentResponseDto })
   @ApiResponse({ status: 400, description: 'Tournament has already ended' })
   @ApiResponse({ status: 404, description: 'Invalid invite code' })
   @ApiResponse({ status: 409, description: 'You are already a member of this tournament' })
@@ -122,7 +124,7 @@ export class TournamentsController {
       'Example: disable UNHEALTHY_MEAL penalty: `{ "scoringRules": [{ "type": "UNHEALTHY_MEAL", "enabled": false }] }`.',
   })
   @ApiParam({ name: 'id', description: 'Tournament ID' })
-  @ApiResponse({ status: 200, description: 'Updated tournament' })
+  @ApiResponse({ status: 200, description: 'Updated tournament', type: TournamentResponseDto })
   @ApiResponse({ status: 403, description: 'Admin access required' })
   @ApiResponse({ status: 404, description: 'Tournament not found' })
   update(
@@ -189,7 +191,7 @@ export class TournamentsController {
   })
   @ApiParam({ name: 'id', description: 'Tournament ID' })
   @ApiParam({ name: 'userId', description: 'Target user ID' })
-  @ApiResponse({ status: 200, description: 'Updated member (role serialized in lowercase)' })
+  @ApiResponse({ status: 200, description: 'Updated member (role serialized in lowercase)', type: TournamentMemberResponseDto })
   @ApiResponse({ status: 400, description: 'Cannot demote the last admin' })
   @ApiResponse({ status: 403, description: 'Admin access required' })
   @ApiResponse({ status: 404, description: 'Member not found' })
