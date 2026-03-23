@@ -39,4 +39,8 @@ export class CorrectMealDto {
   @IsString()
   @IsNotEmpty()
   correction: string;
+
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
 }

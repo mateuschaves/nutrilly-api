@@ -1,6 +1,9 @@
 import { Injectable, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import OpenAI from 'openai';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 import { AnalyzeMealDto } from './dto/analyze-meal.dto';
 import { CorrectMealDto } from './dto/correct-meal.dto';
 
@@ -12,6 +15,10 @@ export interface FoodAnalysis {
   carbsG: number;
   fatG: number;
   notes: string;
+}
+
+export interface AnalyzeResult extends FoodAnalysis {
+  sessionId: string;
 }
 
 const SHARED_FIELDS = `- name: string (meal name)
@@ -30,11 +37,14 @@ const CORRECT_SYSTEM_PROMPT = `You are a nutrition expert. You will receive a me
 export class MealsAnalysisService {
   private readonly openai: OpenAI;
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private prisma: PrismaService,
+  ) {
     this.openai = new OpenAI({ apiKey: this.config.get('OPENAI_API_KEY') });
   }
 
-  async analyze(dto: AnalyzeMealDto): Promise<FoodAnalysis> {
+  async analyze(userId: string, dto: AnalyzeMealDto): Promise<AnalyzeResult> {
     const hasPhoto = !!dto.photoBase64;
     const hasDescription = !!dto.description;
 
@@ -45,14 +55,19 @@ export class MealsAnalysisService {
       throw new BadRequestException('Provide either photoBase64 or description');
     }
 
-    const content = hasPhoto
+    const result = hasPhoto
       ? await this.analyzeFromPhoto(dto.photoBase64!)
       : await this.analyzeFromDescription(dto.description!);
 
-    return content;
+    const sessionId = randomUUID();
+    await this.prisma.mealAnalysisLog.create({
+      data: { userId, sessionId, type: 'ANALYZE', result: result as unknown as Prisma.InputJsonValue },
+    });
+
+    return { sessionId, ...result };
   }
 
-  async correct(dto: CorrectMealDto): Promise<FoodAnalysis> {
+  async correct(userId: string, dto: CorrectMealDto): Promise<FoodAnalysis> {
     const response = await this.openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
@@ -66,7 +81,19 @@ export class MealsAnalysisService {
       response_format: { type: 'json_object' },
     });
 
-    return this.parseResponse(response.choices[0].message.content);
+    const result = this.parseResponse(response.choices[0].message.content);
+
+    await this.prisma.mealAnalysisLog.create({
+      data: {
+        userId,
+        sessionId: dto.sessionId ?? randomUUID(),
+        type: 'CORRECT',
+        correction: dto.correction,
+        result: result as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    return result;
   }
 
   private async analyzeFromPhoto(photoBase64: string): Promise<FoodAnalysis> {

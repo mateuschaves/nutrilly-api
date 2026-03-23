@@ -27,13 +27,13 @@ export class MealsController {
   ) {}
 
   @Post('analyze')
-  analyze(@Body() dto: AnalyzeMealDto) {
-    return this.mealsAnalysisService.analyze(dto);
+  analyze(@CurrentUser() user: CurrentUserPayload, @Body() dto: AnalyzeMealDto) {
+    return this.mealsAnalysisService.analyze(user.id, dto);
   }
 
   @Post('correct')
-  correct(@Body() dto: CorrectMealDto) {
-    return this.mealsAnalysisService.correct(dto);
+  correct(@CurrentUser() user: CurrentUserPayload, @Body() dto: CorrectMealDto) {
+    return this.mealsAnalysisService.correct(user.id, dto);
   }
 
   @Get()
