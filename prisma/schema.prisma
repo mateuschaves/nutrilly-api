@@ -16,9 +16,10 @@ model User {
   appleId          String?              @unique
   unitPreferences  UserUnitPreferences?
   profile          UserProfile?
-  meals            Meal[]
-  diaryEntries     DiaryEntry[]
-  hydrationEntries HydrationEntry[]
+  meals              Meal[]
+  diaryEntries       DiaryEntry[]
+  mealAnalysisLogs   MealAnalysisLog[]
+  hydrationEntries   HydrationEntry[]
   weightLogs       WeightLog[]
   achievements     UserAchievement[]
   tournamentMemberships  TournamentMember[]
@@ -94,6 +95,22 @@ model DiaryEntry {
 
   @@index([userId, date])
   @@map("diary_entries")
+}
+
+model MealAnalysisLog {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  sessionId  String   // groups an ANALYZE + its subsequent CORRECTs
+  type       String   // "ANALYZE" | "CORRECT"
+  correction String?  // the correction instruction (only for CORRECT)
+  result     Json     // FoodAnalysis result
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([sessionId])
+  @@map("meal_analysis_logs")
 }
 
 model HydrationEntry {

@@ -12,13 +12,29 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser, CurrentUserPayload } from '../auth/decorators/current-user.decorator';
 import { MealsService } from './meals.service';
+import { MealsAnalysisService } from './meals-analysis.service';
 import { CreateMealDto } from './dto/create-meal.dto';
 import { UpdateMealDto } from './dto/update-meal.dto';
+import { AnalyzeMealDto } from './dto/analyze-meal.dto';
+import { CorrectMealDto } from './dto/correct-meal.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('meals')
 export class MealsController {
-  constructor(private mealsService: MealsService) {}
+  constructor(
+    private mealsService: MealsService,
+    private mealsAnalysisService: MealsAnalysisService,
+  ) {}
+
+  @Post('analyze')
+  analyze(@CurrentUser() user: CurrentUserPayload, @Body() dto: AnalyzeMealDto) {
+    return this.mealsAnalysisService.analyze(user.id, dto);
+  }
+
+  @Post('correct')
+  correct(@CurrentUser() user: CurrentUserPayload, @Body() dto: CorrectMealDto) {
+    return this.mealsAnalysisService.correct(user.id, dto);
+  }
 
   @Get()
   findAll(@CurrentUser() user: CurrentUserPayload) {
