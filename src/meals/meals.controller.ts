@@ -16,6 +16,7 @@ import { MealsAnalysisService } from './meals-analysis.service';
 import { CreateMealDto } from './dto/create-meal.dto';
 import { UpdateMealDto } from './dto/update-meal.dto';
 import { AnalyzeMealDto } from './dto/analyze-meal.dto';
+import { CorrectMealDto } from './dto/correct-meal.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('meals')
@@ -28,6 +29,11 @@ export class MealsController {
   @Post('analyze')
   analyze(@Body() dto: AnalyzeMealDto) {
     return this.mealsAnalysisService.analyze(dto);
+  }
+
+  @Post('correct')
+  correct(@Body() dto: CorrectMealDto) {
+    return this.mealsAnalysisService.correct(dto);
   }
 
   @Get()
