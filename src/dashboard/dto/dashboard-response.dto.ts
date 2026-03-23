@@ -1,87 +1,68 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class MacroProgressDto {
-  @ApiProperty({ example: 120, description: 'Amount consumed in grams' })
+export class CaloriesSummaryDto {
+  @ApiProperty({ example: 1200, description: 'Calories consumed in the user\'s preferred energy unit' })
   consumed: number;
 
-  @ApiProperty({ example: 150, description: 'Daily goal in grams' })
+  @ApiProperty({ example: 2000, description: 'Daily calorie goal in the user\'s preferred energy unit' })
   goal: number;
+
+  @ApiProperty({ example: 'kcal', enum: ['kcal', 'kJ'] })
+  unit: string;
 }
 
-export class CaloriesProgressDto {
-  @ApiProperty({ example: 1200, description: 'Calories consumed today' })
+export class MacroItemDto {
+  @ApiProperty({ example: 'Protein', description: 'Macro name' })
+  label: string;
+
+  @ApiProperty({ example: 87, description: 'Amount consumed in grams' })
+  value: number;
+
+  @ApiProperty({ example: 'g', description: 'Unit (always grams)' })
+  unit: string;
+
+  @ApiProperty({ example: 'protein', enum: ['protein', 'carbs', 'fat'] })
+  type: string;
+}
+
+export class WaterSummaryDto {
+  @ApiProperty({ example: 1.8, description: 'Water consumed in the user\'s preferred water unit' })
   consumed: number;
 
-  @ApiProperty({ example: 2000, description: 'Daily calorie goal' })
+  @ApiProperty({ example: 2.6, description: 'Daily water goal in the user\'s preferred water unit' })
   goal: number;
 
-  @ApiProperty({ example: 800, description: 'Calories remaining to reach daily goal' })
-  remaining: number;
-
-  @ApiProperty({ example: 60.0, description: 'Percentage of daily calorie goal reached (0–100)' })
-  progress_percent: number;
+  @ApiProperty({ example: 'l', enum: ['l', 'fl_oz'] })
+  unit: string;
 }
 
-export class MacrosSummaryDto {
-  @ApiProperty({ type: MacroProgressDto })
-  protein: MacroProgressDto;
-
-  @ApiProperty({ type: MacroProgressDto })
-  carbs: MacroProgressDto;
-
-  @ApiProperty({ type: MacroProgressDto })
-  fat: MacroProgressDto;
-}
-
-export class HydrationProgressDto {
-  @ApiProperty({ example: 1000, description: 'Water consumed today in milliliters' })
-  consumed_ml: number;
-
-  @ApiProperty({ example: 2000, description: 'Daily water goal in milliliters' })
-  goal_ml: number;
-
-  @ApiProperty({ example: 50.0, description: 'Percentage of daily water goal reached (0–100)' })
-  progress_percent: number;
-}
-
-export class LastMealSummaryDto {
-  @ApiProperty({ example: 'lunch', enum: ['breakfast', 'lunch', 'dinner', 'snack'] })
+export class LastMealDto {
+  @ApiProperty({ example: 'Almoço', description: 'Name of the meal' })
   name: string;
 
-  @ApiProperty({ example: 600, description: 'Total calories of the last meal' })
+  @ApiProperty({ example: 600, description: 'Calories of the last meal in the user\'s preferred energy unit' })
   calories: number;
 
-  @ApiProperty({ example: '2024-01-15T12:30:00.000Z' })
-  eaten_at: string;
-}
+  @ApiProperty({ example: 'kcal', enum: ['kcal', 'kJ'] })
+  unit: string;
 
-export class StreakSummaryDto {
-  @ApiProperty({ example: 7, description: 'Number of consecutive days the user has met their daily goals' })
-  current_streak: number;
-
-  @ApiProperty({ example: 30, description: 'All-time best streak in days' })
-  best_streak: number;
-
-  @ApiProperty({ example: 23, description: 'Days remaining to beat the best streak' })
-  days_to_record: number;
+  @ApiProperty({ example: 2, description: 'Hours since the meal was logged' })
+  hoursAgo: number;
 }
 
 export class DashboardResponseDto {
-  @ApiProperty({ example: '2024-01-15', description: 'Current date (YYYY-MM-DD)' })
-  date: string;
+  @ApiProperty({ type: CaloriesSummaryDto })
+  calories: CaloriesSummaryDto;
 
-  @ApiProperty({ type: CaloriesProgressDto })
-  calories: CaloriesProgressDto;
+  @ApiProperty({ type: [MacroItemDto] })
+  macros: MacroItemDto[];
 
-  @ApiProperty({ type: MacrosSummaryDto })
-  macros: MacrosSummaryDto;
+  @ApiProperty({ type: WaterSummaryDto })
+  water: WaterSummaryDto;
 
-  @ApiProperty({ type: HydrationProgressDto })
-  hydration: HydrationProgressDto;
+  @ApiPropertyOptional({ type: LastMealDto, nullable: true })
+  lastMeal: LastMealDto | null;
 
-  @ApiPropertyOptional({ type: LastMealSummaryDto, nullable: true, description: "Summary of the user's most recent meal, or null if no meals logged" })
-  last_meal: LastMealSummaryDto | null;
-
-  @ApiProperty({ type: StreakSummaryDto })
-  streak: StreakSummaryDto;
+  @ApiProperty({ example: 7, description: 'Current consecutive-day streak' })
+  streak: number;
 }

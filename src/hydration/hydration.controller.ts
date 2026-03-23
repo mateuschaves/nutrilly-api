@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser, CurrentUserPayload } from '../auth/decorators/current-user.decorator';
 import { HydrationService } from './hydration.service';
 import { CreateHydrationEntryDto } from './dto/create-hydration-entry.dto';
-import { AddHydrationEntryResponseDto } from './dto/hydration-response.dto';
+import { AddHydrationEntryResponseDto, HydrationByDateResponseDto } from './dto/hydration-response.dto';
 
 @ApiTags('hydration')
 @ApiBearerAuth()
@@ -15,7 +15,7 @@ export class HydrationController {
 
   @Get(':dateKey')
   @ApiOperation({ summary: 'Get hydration entries for a given date' })
-  @ApiResponse({ status: 200, description: 'Hydration summary with entries, totalConsumed, goal, and unit' })
+  @ApiResponse({ status: 200, type: HydrationByDateResponseDto, description: 'Hydration summary with entries, totalConsumed, goal, and unit in the user\'s preferred water unit' })
   @ApiResponse({ status: 400, description: 'Invalid date format' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   getByDate(
