@@ -33,7 +33,12 @@ export class HydrationService {
     const waterGoalMl = profile?.waterGoalMl ?? 2600;
 
     return {
-      entries,
+      entries: entries.map((e) => ({
+        id: e.id,
+        amount: this.unitsService.convertWater(e.amountMl, waterUnit),
+        unit: waterUnit,
+        loggedAt: e.loggedAt,
+      })),
       totalConsumed: this.unitsService.convertWater(totalMl, waterUnit),
       goal: this.unitsService.convertWater(waterGoalMl, waterUnit),
       unit: waterUnit,
@@ -43,14 +48,24 @@ export class HydrationService {
   async addEntry(userId: string, date: string, dto: CreateHydrationEntryDto) {
     if (!DATE_REGEX.test(date)) throw new BadRequestException('Invalid date format. Use YYYY-MM-DD');
 
-    const entry = await this.prisma.hydrationEntry.create({
-      data: { userId, date, amountMl: dto.amountMl },
-      select: { id: true, amountMl: true, loggedAt: true },
-    });
+    const [entry, units] = await Promise.all([
+      this.prisma.hydrationEntry.create({
+        data: { userId, date, amountMl: dto.amountMl },
+        select: { id: true, amountMl: true, loggedAt: true },
+      }),
+      this.unitsService.getUserUnits(userId),
+    ]);
 
+    const waterUnit = units.water as WaterUnit;
     const newAchievements = await this.achievements.evaluateForHydration(userId);
 
-    return { ...entry, newAchievements };
+    return {
+      id: entry.id,
+      amount: this.unitsService.convertWater(entry.amountMl, waterUnit),
+      unit: waterUnit,
+      loggedAt: entry.loggedAt,
+      newAchievements,
+    };
   }
 
   async removeEntry(userId: string, date: string, entryId: string) {
