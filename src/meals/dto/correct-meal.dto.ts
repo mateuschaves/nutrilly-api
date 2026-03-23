@@ -12,19 +12,19 @@ export class CurrentAnalysisDto {
 
   @IsNumber()
   @Min(0)
-  calories: number;
+  kcal: number;
 
   @IsNumber()
   @Min(0)
-  protein: number;
+  proteinG: number;
 
   @IsNumber()
   @Min(0)
-  carbs: number;
+  carbsG: number;
 
   @IsNumber()
   @Min(0)
-  fat: number;
+  fatG: number;
 
   @IsOptional()
   @IsString()
