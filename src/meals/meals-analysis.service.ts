@@ -81,7 +81,7 @@ export class MealsAnalysisService {
       response_format: { type: 'json_object' },
     });
 
-    const result = this.parseResponse(response.choices[0].message.content);
+    const result = this.parseResponse(response.choices[0]?.message.content ?? null);
 
     await this.prisma.mealAnalysisLog.create({
       data: {
@@ -119,7 +119,7 @@ export class MealsAnalysisService {
       response_format: { type: 'json_object' },
     });
 
-    return this.parseResponse(response.choices[0].message.content);
+    return this.parseResponse(response.choices[0]?.message.content ?? null);
   }
 
   private async analyzeFromDescription(description: string): Promise<FoodAnalysis> {
@@ -133,7 +133,7 @@ export class MealsAnalysisService {
       response_format: { type: 'json_object' },
     });
 
-    return this.parseResponse(response.choices[0].message.content);
+    return this.parseResponse(response.choices[0]?.message.content ?? null);
   }
 
   private parseResponse(content: string | null): FoodAnalysis {
