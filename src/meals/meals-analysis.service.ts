@@ -4,6 +4,8 @@ import { randomUUID } from 'crypto';
 import OpenAI from 'openai';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { UnitsService } from '../units/units.service';
+import { EnergyUnit } from '../units/units.types';
 import { AnalyzeMealDto } from './dto/analyze-meal.dto';
 import { CorrectMealDto } from './dto/correct-meal.dto';
 
@@ -17,7 +19,12 @@ export interface FoodAnalysis {
   notes: string;
 }
 
-export interface AnalyzeResult extends FoodAnalysis {
+export interface FoodAnalysisResponse extends FoodAnalysis {
+  calories: number;
+  energyUnit: EnergyUnit;
+}
+
+export interface AnalyzeResult extends FoodAnalysisResponse {
   sessionId: string;
 }
 
@@ -40,6 +47,7 @@ export class MealsAnalysisService {
   constructor(
     private config: ConfigService,
     private prisma: PrismaService,
+    private unitsService: UnitsService,
   ) {
     this.openai = new OpenAI({ apiKey: this.config.get('OPENAI_API_KEY') });
   }
@@ -55,33 +63,45 @@ export class MealsAnalysisService {
       throw new BadRequestException('Provide either photoBase64 or description');
     }
 
-    const result = hasPhoto
-      ? await this.analyzeFromPhoto(dto.photoBase64!)
-      : await this.analyzeFromDescription(dto.description!);
+    const [rawResult, units] = await Promise.all([
+      hasPhoto
+        ? this.analyzeFromPhoto(dto.photoBase64!)
+        : this.analyzeFromDescription(dto.description!),
+      this.unitsService.getUserUnits(userId),
+    ]);
 
     const sessionId = randomUUID();
     await this.prisma.mealAnalysisLog.create({
-      data: { userId, sessionId, type: 'ANALYZE', result: result as unknown as Prisma.InputJsonValue },
+      data: { userId, sessionId, type: 'ANALYZE', result: rawResult as unknown as Prisma.InputJsonValue },
     });
 
-    return { sessionId, ...result };
+    const energyUnit = units.energy as EnergyUnit;
+    return {
+      sessionId,
+      ...rawResult,
+      calories: this.unitsService.convertEnergy(rawResult.kcal, energyUnit),
+      energyUnit,
+    };
   }
 
-  async correct(userId: string, dto: CorrectMealDto): Promise<FoodAnalysis> {
-    const response = await this.openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: CORRECT_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `Current analysis:\n${JSON.stringify(dto.current)}\n\nCorrection: ${dto.correction}`,
-        },
-      ],
-      max_tokens: 300,
-      response_format: { type: 'json_object' },
-    });
+  async correct(userId: string, dto: CorrectMealDto): Promise<FoodAnalysisResponse> {
+    const [response, units] = await Promise.all([
+      this.openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: CORRECT_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: `Current analysis:\n${JSON.stringify(dto.current)}\n\nCorrection: ${dto.correction}`,
+          },
+        ],
+        max_tokens: 300,
+        response_format: { type: 'json_object' },
+      }),
+      this.unitsService.getUserUnits(userId),
+    ]);
 
-    const result = this.parseResponse(response.choices[0]?.message.content ?? null);
+    const rawResult = this.parseResponse(response.choices[0]?.message.content ?? null);
 
     await this.prisma.mealAnalysisLog.create({
       data: {
@@ -89,11 +109,16 @@ export class MealsAnalysisService {
         sessionId: dto.sessionId ?? randomUUID(),
         type: 'CORRECT',
         correction: dto.correction,
-        result: result as unknown as Prisma.InputJsonValue,
+        result: rawResult as unknown as Prisma.InputJsonValue,
       },
     });
 
-    return result;
+    const energyUnit = units.energy as EnergyUnit;
+    return {
+      ...rawResult,
+      calories: this.unitsService.convertEnergy(rawResult.kcal, energyUnit),
+      energyUnit,
+    };
   }
 
   private async analyzeFromPhoto(photoBase64: string): Promise<FoodAnalysis> {
