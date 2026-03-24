@@ -209,59 +209,10 @@ export class AuthService {
   }
 
   private jwkToPem(jwk: { n: string; e: string }): string {
-    const n = Buffer.from(jwk.n, 'base64url');
-    const e = Buffer.from(jwk.e, 'base64url');
-
-    const nLen = n.length;
-    const eLen = e.length;
-
-    const rsaPublicKey = Buffer.concat([
-      Buffer.from([0x30]),
-      this.encodeLength(nLen + eLen + 4 + (n[0] & 0x80 ? 1 : 0) + (e[0] & 0x80 ? 1 : 0)),
-      Buffer.from([0x02]),
-      this.encodeLength(nLen + (n[0] & 0x80 ? 1 : 0)),
-      n[0] & 0x80 ? Buffer.from([0x00]) : Buffer.alloc(0),
-      n,
-      Buffer.from([0x02]),
-      this.encodeLength(eLen + (e[0] & 0x80 ? 1 : 0)),
-      e[0] & 0x80 ? Buffer.from([0x00]) : Buffer.alloc(0),
-      e,
-    ]);
-
-    const algorithmIdentifier = Buffer.from([
-      0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
-      0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
-    ]);
-
-    const bitString = Buffer.concat([
-      Buffer.from([0x03]),
-      this.encodeLength(rsaPublicKey.length + 1),
-      Buffer.from([0x00]),
-      rsaPublicKey,
-    ]);
-
-    const spki = Buffer.concat([
-      Buffer.from([0x30]),
-      this.encodeLength(algorithmIdentifier.length + bitString.length),
-      algorithmIdentifier,
-      bitString,
-    ]);
-
-    const base64 = spki.toString('base64');
-    const lines = base64.match(/.{1,64}/g) || [];
-    return `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----`;
-  }
-
-  private encodeLength(length: number): Buffer {
-    if (length < 128) {
-      return Buffer.from([length]);
-    }
-    const bytes: number[] = [];
-    let temp = length;
-    while (temp > 0) {
-      bytes.unshift(temp & 0xff);
-      temp = temp >> 8;
-    }
-    return Buffer.from([0x80 | bytes.length, ...bytes]);
+    const keyObject = crypto.createPublicKey({
+      key: { kty: 'RSA', n: jwk.n, e: jwk.e },
+      format: 'jwk',
+    });
+    return keyObject.export({ type: 'spki', format: 'pem' }) as string;
   }
 }
