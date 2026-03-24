@@ -55,6 +55,10 @@ Authorization: Bearer <access_token>
       'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui-bundle.js',
       'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui-standalone-preset.js',
     ],
+    jsonDocumentUrl: '/api/docs-json',
+    swaggerOptions: {
+      url: '/api/docs-json',
+    },
   });
 
   const port = process.env.PORT || 3000;
