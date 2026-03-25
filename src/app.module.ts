@@ -14,6 +14,7 @@ import { R2Module } from './r2/r2.module';
 import { AchievementsModule } from './achievements/achievements.module';
 import { TournamentsModule } from './tournaments/tournaments.module';
 import { DevicesModule } from './devices/devices.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { DevicesModule } from './devices/devices.module';
     R2Module,
     TournamentsModule,
     DevicesModule,
+    OnboardingModule,
   ],
 })
 export class AppModule {}
